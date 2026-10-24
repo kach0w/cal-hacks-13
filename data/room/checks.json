@@ -1,4 +1,8 @@
 {
-  "lens_measured": [4.22, 2.63, 5.52],
+  "lens_measured": [
+    4.22,
+    2.63,
+    6.52
+  ],
   "test_points": {}
 }

@@ -346,14 +346,15 @@ def plan_png(path, glb, mesh, T, world_markers, ppm=100):
 
 
 def frame_picks(mesh, path, convention_key, repick):
+    """The corner and wall clicks, reused only for the same scan and convention."""
     if path.exists() and not repick:
         saved = load_json(path)
-        if saved.get("convention") == convention_key:
+        if saved.get("convention") == convention_key and saved.get("mesh_vertices") == len(mesh.vertices):
             print(f"  reusing the corner and wall clicks in {path} (--repick to redo)")
             return [np.array(saved[k]) for k in ("corner", "along_a", "along_b")]
     pts = pick_points(mesh, 3, "Click 3 points: (1) a room corner, on the floor where two walls meet, "
                                "(2) anywhere on one of those walls, (3) anywhere on the other wall")
-    save_json(path, {"convention": convention_key, "corner": pts[0].tolist(),
+    save_json(path, {"convention": convention_key, "mesh_vertices": len(mesh.vertices), "corner": pts[0].tolist(),
                      "along_a": pts[1].tolist(), "along_b": pts[2].tolist()})
     return list(pts)
 

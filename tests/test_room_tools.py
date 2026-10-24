@@ -213,7 +213,7 @@ def test_gltf_mesh_in_a_zip():
             for p in export.rglob("*"):
                 z.write(p, p.relative_to(tmp / "export"))
         corner, a, b = transform(POSE_FRAME, [(0, 0, 0), (1.5, 0, 0), (0, 0, 1.6)])
-        save_json(out / "frame_picks.json", {"convention": "inverse alignment|c2w|arkit",
+        save_json(out / "frame_picks.json", {"convention": "inverse alignment|c2w|arkit", "mesh_vertices": len(room_mesh()[0]),
                                              "corner": corner.tolist(), "along_a": a.tolist(), "along_b": b.tolist()})
         sys.argv = ["scan_to_room.py", str(tmp / "scan.zip"), "--marker-size", str(S), "--out", str(out)]
         s2r.main()
@@ -294,7 +294,7 @@ def test_calibrate_intrinsics():
         frame = cv2.warpPerspective(art, H, (1280, 720), borderValue=90)
         if (found := ci.find_board(detector, frame)) is not None:
             views.append(found)
-    rms, K2, dist = ci.calibrate(board, views, (1280, 720))
+    rms, K2, dist, used = ci.calibrate(board, views, (1280, 720))
     assert rms < 0.5 and np.abs(K2 - K).max() < 5, (rms, K2)
 
 

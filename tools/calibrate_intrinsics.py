@@ -32,6 +32,8 @@ MIN_CORNERS = 12  # of the board's 24 inner corners
 MIN_MOVE_PX = 60  # how far the board must move before another frame is kept
 TARGET_VIEWS = 20
 RMS_WARN_PX = 1.0
+OUTLIER_X = 2.0  # a view fitting this many times worse than the median is dropped
+MIN_VIEWS = 10
 
 
 def make_board():
@@ -48,7 +50,10 @@ def find_board(detector, gray):
 
 
 def calibrate(board, views, size):
-    """views: [(corners, ids)] -> (rms_px, K, dist[5])."""
+    """views: [(corners, ids)] -> (rms_px, K, dist[5], views used).
+
+    Views that fit much worse than the rest (usually motion blur) are dropped and the lens re-solved.
+    k3 stays 0, the usual choice for webcams: left free, it soaks up noise as extreme distortion."""
     obj, img = [], []
     for corners, ids in views:
         o, i = board.matchImagePoints(corners, ids)
@@ -57,8 +62,16 @@ def calibrate(board, views, size):
             img.append(i)
     if len(obj) < 6:
         sys.exit(f"only {len(obj)} usable views; need at least 6, ideally ~20")
-    rms, K, dist, _, _ = cv2.calibrateCamera(obj, img, size, None, None)
-    return float(rms), K, dist.ravel()[:5]
+    while True:
+        rms, K, dist, _, _, _, _, per_view = cv2.calibrateCameraExtended(obj, img, size, None, None,
+                                                                         flags=cv2.CALIB_FIX_K3)
+        per_view = per_view.ravel()
+        bad = per_view > max(OUTLIER_X * np.median(per_view), 1.0)
+        if not bad.any() or len(obj) - bad.sum() < MIN_VIEWS:
+            return float(rms), K, dist.ravel()[:5], len(obj)
+        print(f"  dropping {bad.sum()} view(s) with errors of {per_view[bad].min():.1f}+ px (usually motion blur)")
+        obj = [o for o, b in zip(obj, bad) if not b]
+        img = [i for i, b in zip(img, bad) if not b]
 
 
 def save(out, rms, K, dist, n, size):
@@ -131,8 +144,8 @@ def main():
         views, size = from_images(args.images, board, detector)
     else:
         views, size = from_camera(args.camera, board, detector, DATA / "calib_frames")
-    rms, K, dist = calibrate(board, views, size)
-    save(args.out, rms, K, dist, len(views), size)
+    rms, K, dist, used = calibrate(board, views, size)
+    save(args.out, rms, K, dist, used, size)
 
 
 if __name__ == "__main__":

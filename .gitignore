@@ -8,3 +8,5 @@ data/room/scan_raw/
 data/room/calib_frames/
 data/room/*.tmp
 *.zip
+data/room/calib_frames*/
+data/room/*_session1*
