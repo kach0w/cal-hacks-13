@@ -1,0 +1,4 @@
+firmware/band/secrets.h
+__pycache__/
+.venv/
+*.pt
