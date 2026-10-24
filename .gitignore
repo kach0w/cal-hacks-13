@@ -1,0 +1,6 @@
+*.pt
+range_log.csv
+__pycache__/
+
+
+p.md
