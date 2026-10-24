@@ -1,0 +1,9 @@
+# Python 3.11 (open3d has no wheels for 3.13+):  python3.11 -m venv .venv && .venv/bin/pip install -r requirements.txt
+ultralytics>=8.4           # YOLO-World + YOLOE (yoloe-26 needs 8.4)
+opencv-python>=4.9         # ArUco is in core since 4.7 — don't also install opencv-contrib-python
+numpy
+open3d>=0.18               # Part E: ray-casting the room mesh
+pytest
+# Task 4 (HTTP):
+fastapi
+uvicorn

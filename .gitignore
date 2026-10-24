@@ -2,3 +2,6 @@ data/*
 !data/reference/
 __pycache__/
 *.pt
+.venv/
+mobileclip*.ts
+.DS_Store
