@@ -4,3 +4,7 @@ __pycache__/
 
 
 p.md
+data/room/scan_raw/
+data/room/calib_frames/
+data/room/*.tmp
+*.zip

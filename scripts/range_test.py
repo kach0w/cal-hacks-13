@@ -20,9 +20,7 @@ Keys while running:
 
 import argparse
 import csv
-import json
 import statistics
-import subprocess
 import sys
 import time
 from collections import deque
@@ -33,47 +31,13 @@ import cv2
 import torch
 from ultralytics import YOLO, YOLOWorld
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+from webcam import open_camera  # noqa: E402
+
 WINDOW = 30  # frames behind the hit-rate readout, ~1s
 SHOW_BELOW = 0.05  # draw near-misses down to here, in orange
 DISPLAY_WIDTH = 1280
 LOG = Path("range_log.csv")
-
-
-def list_cameras():
-    """Camera names in OpenCV's index order.
-
-    OpenCV's AVFoundation backend sorts devices by uniqueID before indexing them,
-    so sorting system_profiler's list the same way gives matching indices.
-    """
-    out = subprocess.run(
-        ["system_profiler", "-json", "SPCameraDataType"], capture_output=True, text=True
-    ).stdout
-    cams = json.loads(out or "{}").get("SPCameraDataType", [])
-    cams.sort(key=lambda c: c.get("spcamera_unique-id", ""))
-    return [c["_name"] for c in cams]
-
-
-def open_camera(camera, width, height):
-    names = list_cameras()
-    for i, name in enumerate(names):
-        print(f"  [{i}] {name}")
-
-    if camera.isdigit():
-        index = int(camera)
-    else:
-        matches = [i for i, n in enumerate(names) if camera.lower() in n.lower()]
-        if len(matches) != 1:
-            sys.exit(f"'{camera}' matched {len(matches)} cameras; pass a name from the list or its index")
-        index = matches[0]
-
-    cap = cv2.VideoCapture(index, cv2.CAP_AVFOUNDATION)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-    if not cap.isOpened():
-        sys.exit(f"couldn't open camera {index} (check the terminal's camera permission)")
-    w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    print(f"using [{index}] {names[index] if index < len(names) else '?'} at {w}x{h}")
-    return cap
 
 
 def load_model(name, objects):

@@ -1,10 +1,12 @@
 # Recall — system design
 
-Two webcams cover a room. A one-time phone scan gives them a 3D map of the room's fixed
-surfaces. The cameras keep a running memory of where each object is in that map. A band on
-the wrist buzzes faster as the hand gets closer to the one you asked for.
+One webcam, high in a corner, watches a room. A one-time phone scan gives it a 3D map of the
+room's fixed surfaces. The camera keeps a running memory of where each object is in that map.
+A band on the wrist buzzes faster as the hand gets closer to the one you asked for.
 
-Product context, scope and demo: [PLAN.md](./PLAN.md).
+Product context, scope and demo: [PLAN.md](./PLAN.md). The camera pipeline as built:
+[CAMERA.md](./CAMERA.md). The room files between setup and the live loop:
+[handoffAB.md](./handoffAB.md).
 
 **Four things to take away:**
 
@@ -25,58 +27,64 @@ Every number in §9 is a starting point to calibrate on the real rig, not a tune
 
 ## 1. Setup (once)
 
-Done by the care partner, never the person living there. About ten minutes.
+Done by the care partner, never the person living there. About twenty minutes. The file
+contract is [handoffAB.md](./handoffAB.md); the tools are in `tools/`.
 
-1. **Put one printed tag** (`printables/setup_tag.pdf`: ArUco `DICT_4X4_50` id 0, 18cm) on
-   the floor in the middle of the room, where both cameras can see it. **Tape its outline.**
-2. **Clear small objects off the surfaces and scan the room** with a LiDAR iPhone and an
-   existing scan app. The tag is in the scan.
-3. **Find the tag in the scan** (§1.1).
-4. **Each camera finds the tag** and works out where it is in the map (§1.2).
-5. **Turn the scan into one depth image per camera** (§1.3).
-6. **Remove the tag.**
-7. **Name the surfaces** (§6.1) and **list the objects** by name.
+1. **Tape an L on the floor at one corner of the room.** That corner is the origin: metres,
+   Y up, floor at y = 0, X and Z along the two walls.
+2. **Put up at least 3 markers** (`printables/markers.pdf`: ArUco `DICT_4X4_50` ids 0–5, 18cm)
+   where the camera sees them face-on: on the floor **and** a wall it faces, near, middle and
+   far. **They stay up.** A marker on the wall the camera hangs on is seen edge-on and missed.
+3. **Scan** with a LiDAR iPhone: Polycam, **LiDAR mode** (not Room mode), Developer mode on
+   before scanning. Clear small objects first and pass within ~1m of each marker. Export → Raw
+   data → unzip into `data/room/scan_raw/`.
+4. **`tools/scan_to_room.py`** → `room.glb` + `markers.json` (§1.1). You click the taped corner
+   and a floor point along each wall.
+5. **`tools/calibrate_intrinsics.py`** → the webcam's lens (§1.2).
+6. **`tools/register_camera.py`** → `camera.json` + `camera_ref.jpg`: where the camera is (§1.2).
+7. **Tape-measure** the lens and two floor test points into `checks.json`, then
+   **`tools/check_room.py`** (§1.3).
+8. **Name the surfaces** (§6.1) and **list the objects** by name.
 
-**One tag is enough.** It's the one thing both the scan and the cameras see, so it ties
-their coordinates together. Two rules: it must not move between steps 2 and 4, and both
-cameras must see it. If a camera is bumped later, put the tag back on its outline and redo
-steps 4–5 for that camera. No rescan.
+**Camera bumped:** re-run step 6. The markers are still up, so there's no rescan and no clicking.
 
-### 1.1 Finding the tag in the scan
+### 1.1 Markers into the map
 
-The LiDAR measures depth; it can't read the tag. The phone's colour camera can, and the scan
-app uses those images as the mesh's texture — so the tag shows up on the mesh.
+The LiDAR measures depth; it can't read a marker. The phone's colour camera can. Polycam's raw
+export has every keyframe image with the phone's pose, in the same coordinates as the mesh,
+plus LiDAR depth. `scan_to_room.py`:
 
-Open the textured mesh in Blender or MeshLab and click the tag's four corners. That gives
-`tag_in_map`, accurate to about 1cm. If that turns out not to be enough, export the scan
-app's raw frames and per-frame phone positions and detect the tag in them instead.
+1. **Checks the export lines up:** mesh depth against LiDAR depth, for every way of reading
+   Polycam's poses, keeping the one under 2cm. If none is, the export can't be trusted: click
+   marker corners on the mesh by hand instead (CAMERA.md E3).
+2. **Finds the markers** in every keyframe and casts each corner onto the mesh, taking the
+   median over sightings. Markers and mesh share coordinates by construction.
+3. **Sets the world frame** from your three clicks; the floor near the corner fixes y = 0.
+4. **Writes** `room.glb` (≤ 300k triangles, transforms baked), `markers.json`, and
+   `scan_report.json` (sightings, spread, marker edges vs printed size as a scale check).
 
-### 1.2 Registering the cameras
+### 1.2 Registering the camera
+
+Lens first (`K`, distortion): show the webcam the ChArUco board
+(`printables/calibration_board.pdf`) ~20 times, at 1280×720. Then the camera looks at the
+markers, whose corners are known in the map:
 
 ```python
-T_cam_tag = solvePnP(tag corners in this camera)    # where the tag is, seen from this camera
-T_map_cam = tag_in_map @ inv(T_cam_tag)             # where this camera is, in the map
+R, t = solvePnP(corners from markers.json, the same corners in the image)   # X_cam = R·X_world + t
+camera_center = -Rᵀ t                                                        # the lens, in the room
 ```
 
-Each webcam needs its lens measured first (`K`, distortion): show it the ChArUco board
-(`printables/calibration_board.pdf`) ~20 times. Once per webcam, ~10 minutes.
+Markers on the floor **and** a wall matter: points all on one plane give a much weaker pose.
 
 **Watch the axes.** ARKit cameras are y-up, looking down −z. OpenCV cameras are y-down,
 looking down +z. Convert with `diag(1, −1, −1)`. Getting this wrong mirrors the world without
-an error.
+an error; step 1 of §1.1 catches it.
 
-### 1.3 Depth images
+### 1.3 Check it
 
-Render the scan from each camera's position: for every pixel, the distance to the fixed
-room behind it. Save it as one array per camera. **At runtime, the mesh is never loaded** —
-depth is an array lookup.
-
-Pixels the scan missed (glass, mirrors, places the phone didn't point) have no depth.
-
-### 1.4 Check it
-
-Pick two points on a table, compare their distance in the map to a tape measure. A 1° error
-is ~9cm at 5m. Off by more than a few cm → check the axes first.
+`check_room.py` runs the handoff's acceptance table: reprojection < 5px; camera within 5cm of
+the tape; a floor object within 5cm mid-room and 10cm in the far corner; scale within 2%. A 1°
+error is ~9cm at 5m.
 
 ---
 
@@ -84,15 +92,15 @@ is ~9cm at 5m. Off by more than a few cm → check the axes first.
 
 | | Map | Memory |
 |---|---|---|
-| **Is** | The scan, as a depth image per camera | Per object: position, surface, status, time, photo |
+| **Is** | The scan (`room.glb`), precomputed as the map point behind every camera pixel (`xyz_map.npy`) | Per object: position, surface, status, time, photo |
 | **Changes** | Only when furniture moves | Every confirmed move |
-| **Used for** | Depth for objects one camera sees (§4.1) | Answers, guidance, the care-partner page |
+| **Used for** | Positions from pixels (§4.1) | Answers, guidance, the care-partner page |
 
-**Small objects are never in the map.** When the keys move, the next sighting looks up depth
-in the unchanged map and updates one row of the memory.
+**Small objects are never in the map.** When the keys move, the next sighting looks up the map
+point behind its pixel and updates one row of the memory.
 
-**The map goes stale only when furniture moves.** Then: tag back on its outline, rescan, redo
-setup. Bags and baskets are listed as *objects*, not part of the map, so they never cause this.
+**The map goes stale only when furniture moves.** Then rescan with the markers still up and
+re-run §1 steps 4 and 6. Bags and baskets are listed as *objects*, not part of the map, so they never cause this.
 
 ---
 
@@ -100,11 +108,11 @@ setup. Bags and baskets are listed as *objects*, not part of the map, so they ne
 
 ```mermaid
 flowchart LR
-    CAM["Cameras A + B"] --> MARK["Find the wrist marker<br/>cheap · every frame · both"]
-    CAM --> DET["Find + name objects<br/>costly · alternates A/B"]
-    MARK --> WRIST["Wrist position<br/>triangulated"]
-    DET --> LOC["Object positions<br/>triangulate or depth lookup"]
-    MAP[("Depth images<br/>from the scan")] --> LOC
+    CAM["Corner camera"] --> MARK["Find the wrist marker<br/>cheap · every frame"]
+    CAM --> DET["Find + name objects<br/>costly · when the image changes"]
+    MARK --> WRIST["Wrist position<br/>open: §4.2"]
+    DET --> LOC["Object positions<br/>pixel → map"]
+    MAP[("xyz_map<br/>from the scan")] --> LOC
     WRIST --> FAST["Fast lane<br/>wrist ↔ target distance"]
     LOC --> FAST
     LOC --> SLOW["Slow lane<br/>the memory"]
@@ -128,12 +136,9 @@ awful.** The memory is slow to be convinced on purpose; the band must not be.
 
 **One thing crosses, in one direction:** a question tells the fast lane *what to home on*.
 
-**Everything is in map coordinates,** so the wrist can be in camera A's view while the target
-is in camera B's.
-
-**Two costs, two rates.** Finding the marker is a colour threshold — a few ms, every frame,
-both cameras. Finding objects is a neural net at ~20–70ms, alternating cameras. Objects sit
-still; the hand is the part that moves, and it's the cheap half.
+**Two costs, two rates.** Finding the marker is a colour threshold — a few ms, every frame.
+Finding objects is a neural net at ~20–70ms, run when the image changes (CAMERA.md's change
+gate). Objects sit still; the hand is the part that moves, and it's the cheap half.
 
 ---
 
@@ -142,25 +147,29 @@ still; the hand is the part that moves, and it's the cheap half.
 ### 4.1 Objects
 
 The detector is YOLO-World, given the object names ("keys", "wallet", "blue bag"). **The
-name is the identity** — "keys" in camera A and "keys" in camera B are the same keys.
+name is the identity:** one best box per name per frame.
 
-| Seen by | Position from |
+| Object | Position from |
 |---|---|
-| **Both cameras** | **Triangulate** the box centres. Reject if reprojection error > `TRI_MAX_PX` |
-| **One camera** | **Depth lookup** at the box's **bottom-centre** — where the object touches the surface |
-| **Neither** | No position this frame. The memory keeps the last one (§8) |
+| **On any scanned surface** | **`pixel_to_world`** at the box's **bottom-centre**: the map point behind that pixel |
+| **On the floor** | **`floor_hit`**: the pixel's ray meets y = 0. Exact, no mesh needed |
+| **Not seen** | No position this frame. The memory keeps the last one (§8) |
 
 Use the bottom-centre, not the middle: the middle of a tall object lines up with the wall
-behind it, not the surface it's on. No depth at that pixel → no position.
+behind it, not the surface it's on. No map point behind that pixel → no position.
 
 ### 4.2 The wrist
 
-The band carries a **magenta marker**. Both cameras find it and **triangulate** it.
+The band carries a **magenta marker**. **One camera can't triangulate it**, so this is open
+(§13). The two candidates:
 
-**Never use the depth image for the wrist.** The hand wasn't in the scan, so the depth
-behind it is the couch or the floor, not the hand.
+- **A printed tag on the band:** one camera gets its 3D position from the tag's known size.
+  About 2.5m of range for a 5cm tag.
+- **Closeness in the image:** project the target into the camera (`world_to_pixel`) and measure
+  pixels to the marker. No 3D needed, as in the original design.
 
-Seen by only one camera → treated as lost (§11).
+**Never use the map for the wrist.** The hand wasn't in the scan, so the map point behind it is
+the couch or the floor, not the hand.
 
 ---
 
@@ -225,11 +234,11 @@ Whichever comes first:
 
 | Component | Owns | Does not own |
 |---|---|---|
-| **Setup script** | Lens calibration, tag-in-map, camera registration, depth images, surfaces, object list | Anything at runtime |
-| **Camera threads** | Frame grab per camera, both at once; ring buffer for photos | Interpretation |
-| **Perception** | YOLO-World with the object names → named boxes, per camera | Whether a change is real |
-| **Localizer** | Triangulate or depth lookup → object positions (§4.1) | Memory |
-| **Wrist tracker** | Magenta threshold → triangulated wrist position (§4.2) | Objects |
+| **Setup tools** (`tools/`) | Scan → map + markers, lens calibration, camera registration, acceptance checks | Anything at runtime |
+| **Camera thread** | Frame grab; ring buffer for photos | Interpretation |
+| **Perception** | YOLO-World with the object names → named boxes | Whether a change is real |
+| **Localizer** | `pixel_to_world` / `floor_hit` → object positions (§4.1) | Memory |
+| **Wrist tracker** | Magenta threshold → wrist position (§4.2, open) | Objects |
 | **Change detection** | §8, including the containment guess | Storage format |
 | **Store** | Append-only log, current state, atomic writes, photos | Query semantics |
 | **Query** | Band button → record → speech-to-text → object name | Answers |
@@ -249,9 +258,9 @@ what lets the answer use the household's words.
 ## 7. The seams
 
 ```python
-CameraPose  = {cam, K, dist, T_map_cam, depth_path}
+CameraPose  = {width, height, K, dist, R, t, camera_center, rms_px, markers_used, registered_at}
 Sighting    = {cam, object, bbox, score, ts}               # object = its name
-Position    = {object, xyz, method, ts}                    # method: triangulated | depth
+Position    = {object, xyz, method, ts}                    # method: pixel_to_world | floor_hit
 Transition  = {object, kind, from_surface, to_surface, from_xyz, to_xyz,
                ts, photo_path, confidence}
               # kind: moved | appeared | disappeared | inferred_contained
@@ -266,8 +275,8 @@ Answer      = {text, status, confidence, photo_path}
 ```
 
 All `xyz` are metres in the map. `cam` and `bbox` survive only where pixels matter:
-containment (§8) and photos. Setup writes `rig.json`: the `CameraPose`s, `Surface`s and
-object names. The runtime only reads it.
+containment (§8) and photos. Setup writes `data/room/` (`CameraPose` is `camera.json`;
+handoffAB.md) and the `Surface`s. The runtime only reads them.
 
 **BLE, laptop → band: one byte.** `0..254` is `closeness × ceiling × 254`; `255` is the
 found-it double-pulse.
@@ -297,7 +306,7 @@ Every capture, for each listed object:
 
 ```python
 for obj in objects:
-    pos = localize(obj, cameras)                # §4.1: triangulate, else depth lookup, else None
+    pos = localize(obj, camera)                 # §4.1: the map point at the box's base, else None
 
     if pos:
         obj.misses = 0
@@ -338,14 +347,13 @@ Starting points, to calibrate on the rig.
 
 | Name | Start | Notes |
 |---|---|---|
-| `CAPTURE` | 1920×1080 per camera | Small objects need the pixels at room scale |
+| `CAPTURE` | 1280×720 | The lens calibration is only valid at this resolution (handoffAB.md) |
 | `DETECT_IMGSZ` | 1280 | 640 loses small objects past ~2m. Measure with `scripts/range_test.py` |
-| `DETECT_HZ` | ~2–5 per camera, alternating | |
-| `MARKER_HZ` | every frame (~30), both cameras | |
+| `DETECT_HZ` | ~1, when the image changes | CAMERA.md's change gate |
+| `MARKER_HZ` | every frame (~30) | |
 | `MARKER_HSV` | H 145–165, S > 120, V > 80 | Magenta. **Not** on wood, skin, or any prop |
 | `MARKER_MIN_AREA` | 150 px | Rejects speckle |
-| `SETUP_TAG` | 18cm, ArUco `DICT_4X4_50` id 0 | Use the size measured off the print |
-| `TRI_MAX_PX` | 8 px | Reprojection error to accept a triangulation |
+| `MARKERS` | ≥ 3 up, 18cm, ArUco `DICT_4X4_50` ids 0–5 | Floor and wall. Use the size measured off the print |
 | `MOVE_MIN` | 0.10m | Smaller shifts aren't moves |
 | `D_FAR` | 3.0m | `closeness = 1 − clamp(distance / D_FAR)` |
 | `EMA_ALPHA` | 0.30 @ 30 Hz | ≈100ms time constant |
@@ -360,11 +368,11 @@ Starting points, to calibrate on the rig.
 
 | Work | Cost | Rate |
 |---|---|---|
-| Frame grab, ×2 | ~5ms each | 30 Hz |
-| Marker threshold + contour, ×2 | ~3–5ms each | every frame |
-| Triangulate wrist, distance, EMA, ceiling | <1ms | every frame |
-| **YOLO-World s, on the Mac's GPU** | **~21ms @ 640, ~66ms @ 1280** (measured) | alternating cameras |
-| Depth lookup | free | per detection |
+| Frame grab | ~5ms | 30 Hz |
+| Marker threshold + contour | ~3–5ms | every frame |
+| Wrist, distance, EMA, ceiling | <1ms | every frame |
+| **YOLO-World s, on the Mac's GPU** | **~21ms @ 640, ~66ms @ 1280** (measured) | when the image changes |
+| `pixel_to_world` lookup | free | per detection |
 
 **Fast-lane latency:** grab 5ms → marker 5ms → arithmetic 1ms → BLE 10–20ms → servo ≈
 **40ms**, under the ~150ms where lag becomes noticeable. The servo can't show changes faster
@@ -376,14 +384,14 @@ than a few Hz, so updating closeness above ~15 Hz is wasted.
    the latest positions it published.
 2. **Throttle the BLE write.** Only when the byte changes by ≥2, at most ~15 Hz.
 
-**If it's slow:** `DETECT_IMGSZ` 960, then 2 Hz per camera, then CoreML.
+**If it's slow:** `DETECT_IMGSZ` 960, then a lower rate, then CoreML.
 
 ---
 
 ## 10. Process topology
 
-One Python process. **One uvicorn worker** — two silently corrupt state. A camera thread per
-camera, grabbing in sync; the fast lane runs in the capture loop; perception on its own
+One Python process. **One uvicorn worker** — two silently corrupt state. One camera thread;
+the fast lane runs in the capture loop; perception on its own
 thread; BLE in a small asyncio task so a dropped link can't stall anything. The page polls.
 No websockets.
 
@@ -395,9 +403,10 @@ No websockets.
 
 | Component | How it fails | Mitigation |
 |---|---|---|
-| Setup | Axes wrong; world mirrored | Tape-measure check (§1.4) before anything else |
-| Setup | Camera bumped | Tag back on its outline, redo §1 steps 4–5 for that camera |
-| Setup | Tag corners clicked imprecisely | Bigger tag; raw-frame detection (§1.1) |
+| Setup | Axes wrong; world mirrored | `scan_to_room.py`'s depth check, then `check_room.py` (§1.3) |
+| Setup | Camera bumped | Re-run `register_camera.py`; the markers are still up |
+| Setup | Polycam's export doesn't line up with its own LiDAR | Click marker corners on the mesh (CAMERA.md E3); last resort, our own ARKit app |
+| Setup | A marker isn't detected by the camera | It's seen edge-on or too small: move it to a wall the camera faces, or closer |
 | Map | Furniture moved since the scan | Rescan (§2) |
 | Perception | Small objects missed at range | `range_test.py` early; bigger props; `DETECT_IMGSZ` 1280 |
 | Perception | YOLO-World confuses two props | Props with clearly different names and looks |
@@ -414,10 +423,9 @@ No websockets.
 
 | Event | Behaviour |
 |---|---|
-| **Wrist lost** (hidden, or only one camera sees it) | Hold the last closeness ~1s, then **fade to zero**. Never freeze a strong buzz |
+| **Wrist lost** (hidden, or out of view) | Hold the last closeness ~1s, then **fade to zero**. Never freeze a strong buzz |
 | **Guide target lost** | Re-run §5's chain — usually a lower rung and a gentler pulse |
-| **One camera disconnects** | Objects fall back to depth lookup; the wrist is lost, so the band goes quiet. Voice keeps working |
-| **Both cameras disconnect** | Freeze state, answers stamped "as of ⟨time⟩", band silent |
+| **Camera disconnects** | Freeze state, answers stamped "as of ⟨time⟩", band silent. Voice keeps working |
 | **BLE drops** | Auto-reconnect; the on-screen meter keeps working |
 | **Two markers in view** | Take the larger and log it |
 
@@ -425,8 +433,9 @@ No websockets.
 
 ## 12. Parallel work plan
 
-- **A — space:** lens calibration, scan import, tag-in-map, registration, depth images,
-  surfaces, localizer. Owns `CameraPose`, `Position`, `Surface`.
+- **A — space:** `tools/`: scan → `room.glb` + `markers.json`, lens calibration, camera
+  registration, acceptance checks. Owns `data/room/` (handoffAB.md); B turns it into
+  `pixel_to_world` (CAMERA.md Part E).
 - **B — memory and answers:** perception, change detection, containment, store, query,
   resolver, answers, care-partner page. Owns `Sighting`, `Transition`, `WorldState`,
   `GuideTarget`, `Answer`.
@@ -450,10 +459,12 @@ exists.
 - **Servo or coin motor?** The servo is the stand-in. Swap if the near end feels flat.
 - **Can the detector see the props across the room?** `scripts/range_test.py` at 1–5m, at 640
   and 1280. The answer sets camera placement and `DETECT_IMGSZ`.
-- **Do both cameras see the wrist often enough?** If the couch or the body blocks one camera
-  a lot, add a printed tag to the band so one camera can locate it alone.
-- **Is clicking the tag's corners accurate enough?** The tape measure decides.
-- **Camera placement.** Opposite high corners, both seeing the middle of the room.
+- **How does one camera locate the wrist?** A tag on the band, or closeness in the image
+  (§4.2). C decides; it gates the band.
+- **Does Polycam's raw export line up?** `scan_to_room.py` step 2 answers it on the first real
+  scan.
+- **Camera placement.** High in a corner, facing the marker walls, every marker within ~4m and
+  seen face-on.
 - **Do the ceilings read as "less sure" through a sleeve?** 0.75 and 0.50 are guesses.
 - **How many objects before YOLO-World confuses them?** Five is the demo; beyond is
   unmeasured.
