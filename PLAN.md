@@ -3,8 +3,9 @@
 **A room that remembers for you.**
 
 Two cameras watch a room and remember where the objects that matter ended up — keys,
-wallet, glasses, phone. Ask out loud and hear the answer in a second. Then a band on the
-wrist buzzes faster as you get closer, so you don't have to remember the answer to use it.
+wallet, glasses, phone. Tap the band, say *"I can't find my glasses,"* and hear the answer in
+a second. Then the band buzzes faster as you get closer, so you don't have to remember the
+answer to use it.
 
 Built for people living with Alzheimer's or another dementia, for whom *"where did I put
 it, and I don't remember putting it anywhere"* is not an annoyance but a symptom.
@@ -52,7 +53,9 @@ when the band is flat the voice half still answers.
 
 **The care partner — the second user.** Usually not in the house. They get one page: what's
 where, what changed today, and the picture behind any claim. That turns "is she okay" into
-something answerable without a call that feels like checking up on her.
+something answerable without a call that feels like checking up on her. They also do the
+one-time setup: put one printed tag in the middle of the room, scan with a phone, take the
+tag away again. About ten minutes, and never the primary user's job.
 
 **Who buys it.** Families first, then memory-care facilities running the same product
 across many rooms. The second market is shared workplaces (§7), which is the same engine
@@ -106,33 +109,45 @@ population defined by cognitive load. Haptic object-finding exists, for people w
 see. Haptics for dementia exists, for outdoor wayfinding. Driving haptics from a room's
 memory, for someone who can't remember, is the open seam.
 
-**The band is deliberately dumb — a buzzer with a battery.** No camera, no sensors, no
-localization. The room sees the surface and sees the wrist; the backend sends one number
-over Bluetooth; the band turns it into a pulse rate. Three decisions keep it cheap:
+**The band is deliberately dumb — a buzzer and a button.** No camera, no localization, no
+decisions. Tap the button to ask, tap again to finish. The room sees the surfaces and the
+wrist; the backend sends one number over Bluetooth; the band turns it into a pulse rate.
+Three decisions keep it cheap:
 
 - **"Getting warmer," not "turn left."** Directions need to know which way the body is
   facing, and facing is where all the cost and all the error live. A confidently wrong
   instruction given to someone who can't check it is the one failure this can't survive.
-- **The band wears a coloured marker, and the camera tracks it.** That gives wrist-level
-  precision instead of feet-on-the-floor, where the gradient would go flat exactly in the
-  last half metre. It also makes the wearer self-identifying in a crowded room.
+- **The band wears a magenta marker, and the cameras track it.** Both cameras find the
+  colour and triangulate it. That gives wrist-level precision instead of feet-on-the-floor,
+  where the gradient would go flat exactly in the last half metre.
 - **Bluetooth from the laptop, never venue wifi.** Captive portals break microcontroller
   joins, and venue networking is the top demo-ending risk.
 
-**It needs no calibration.** Warmer/colder needs a distance signal that's *monotonic*, not
-*metric* — as the hand closes on a fixed target, the pixel gap shrinks every time. Closeness
-comes straight from pixel distance. The band adds no new infrastructure at all.
+**Setup is once, and it's not her job.** One printed tag goes in the middle of the room. A
+phone scan maps the room's surfaces, couches included; both cameras see the same tag, which
+puts the scan and the cameras in one set of coordinates. Then the tag comes off. Objects move
+freely after that — their positions are recomputed against the unchanged map, never
+rescanned ([DESIGN.md](./DESIGN.md) §1–2). Distances are real metres, so the band works even
+when the wrist is in one camera's view and the object in the other's.
 
 **The pulse also carries certainty.** An inferred answer can never buzz as hard as an
 observed one. The system's promise is that it never confidently lies, and the band honours
-that in the channel the person is actually using ([DESIGN.md](./DESIGN.md) §3.2).
+that in the channel the person is actually using ([DESIGN.md](./DESIGN.md) §5.2).
 
 ### The honest limits
 
-**Guidance works only in a camera's view.** Voice answers from anywhere; the band guides
-where a camera can see both the wrist and the target. The real interaction is *voice gets
-you to the room, the band finds it in the room* — which is how the product scales, one
-camera per room.
+**Guidance works only where a camera sees the wrist.** Voice answers from anywhere; the band
+guides inside the scanned room. The real interaction is *voice gets you to the room, the
+band finds it in the room* — which is how the product scales, one or two cameras per room.
+
+**Small things are hard to see across a room.** A webcam at 5m gives keys a handful of
+pixels. Camera placement and prop choice follow from measuring this, not assuming it.
+
+**The map goes stale if furniture moves.** Small objects never touch it. A moved armchair
+means putting the tag back on its taped outline and rescanning.
+
+**The band needs both cameras to see the wrist.** Behind a couch from one side, guidance
+goes quiet until the hand is back in view of both.
 
 **It has to be worn and charged, and that's a staging question.** The band serves
 mild-to-moderate stages; the voice half serves later ones. One band on a bedside dock
@@ -143,12 +158,11 @@ of N — and when the band is flat the product still answers.
 
 | Rung | What | Status |
 |---|---|---|
-| 1 | Microcontroller + coin vibration motor + battery on a wrist strap, BLE, marker on the strap | **The thing we want.** ~$10, a few hours |
-| 2 | A phone in a pocket, vibrating off the same signal | **Rehearsed fallback.** Zero hardware risk |
-| 3 | On-screen proximity meter that fills as the wrist approaches | **Build this first.** Proves the claim, and debugs rungs 1 and 2 |
+| 1 | Microcontroller + servo (oscillating, standing in for a vibration motor) + button + battery on a wrist strap, BLE, marker on the strap | **The thing we want.** ~$10, a few hours. Swap to a coin motor if the servo's top speed makes the near end feel flat |
+| 2 | On-screen proximity meter that fills as the wrist approaches | **Build this first.** Proves the claim, debugs rung 1, and is the fallback |
 
-The band receives one byte, so rungs 2 and 3 are genuine drop-ins. Falling to rung 3 loses
-the magic but not the argument.
+The band and the meter read the same byte, so the meter is a genuine drop-in. Falling to it
+loses the magic but not the argument.
 
 ---
 
@@ -181,6 +195,8 @@ answer is forgotten — the failure mode the condition guarantees.
   handful at a time, by the household.
 - **No faces, no identification, no person-tracking.** The system has no concept of *who*
   moved something. It records that the keys moved.
+- **The scan is geometry, and it stays home.** The mesh of the room lives on the local
+  machine, like everything else.
 - **Consent belongs to the person living there**, not only the family — and the
   uncomfortable part said out loud: capacity to consent erodes over exactly the timeline
   this product serves. There is no clean answer. Enrolling few objects, watching surfaces,
@@ -196,14 +212,16 @@ answer is forgotten — the failure mode the condition guarantees.
 
 ## 7. The demo
 
-**Setup.** Two cameras on a plain surface read as a kitchen counter. Five objects every
-judge recognises and has personally lost: **keys, wallet, glasses, phone, remote**, plus a
-bag. Zones generated at onboarding. One band.
+**Setup.** Two cameras on stands at opposite corners of the demo area, overlapping in the
+middle; a table read as a kitchen counter and a chair or side table as a second surface.
+Scanned and registered before judging opens. Five objects every judge recognises and has
+personally lost: **keys, wallet, glasses, phone, remote**, plus a bag — chosen by what
+`scripts/range_test.py` says the cameras can see at the demo distances. One band.
 
 | Time | Beat |
 |---|---|
 | 0:00–0:15 | **Frame it.** "This is a kitchen counter, and these are the five things people with dementia lose and look for all day." |
-| 0:15–0:40 | **Out of sight.** Judge puts the glasses in the bag while you look away. Ask out loud: *"Where are my glasses?"* → *"In the blue bag — inferred, last seen 20 seconds ago."* Show the still. |
+| 0:15–0:40 | **Out of sight.** Judge puts the glasses in the bag while you look away. Tap the band: *"I can't find my glasses."* Tap. → *"In the blue bag — inferred, last seen 20 seconds ago."* Show the still. |
 | 0:40–1:05 | **The band, on the judge's wrist.** They hunt; it pulses faster as they close in. Let them find it by feel, without being told where it is. "She doesn't have to remember what it said — she just follows it." |
 | 1:05–1:15 | **Ask again. Twice.** Same question, same answer, instantly. "That's the ninth time before lunch, and nobody sighed." |
 | 1:15–1:25 | **The care partner's page.** What moved today, with the picture behind each change. |
@@ -218,8 +236,7 @@ unmistakable through a sleeve in a loud room.
 observation, and a hand passing over the counter producing no phantom move. Twenty seconds,
 and it keeps the technical track in play without changing the lead.
 
-**If something breaks:** band dead or BLE drops → phone in a pocket, then the on-screen
-meter. Voice fails in the noise → typed query, one click away. Inference misfires → say
+**If something breaks:** band dead or BLE drops → the on-screen meter. Voice fails in the noise → typed query, one click away. Inference misfires → say
 what it did and why it was unsure; a system that admits uncertainty *is* the pitch.
 
 ---
@@ -233,17 +250,25 @@ thing that's flawless, when reliability *is* the demo.
 
 | # | Thing | Why it survived the cut |
 |---|---|---|
-| 1 | Camera loops, detection + identity, enroll 5 objects + the bag | No product without it |
-| 2 | Onboarding zones → "on the counter" | The human-readable half of every answer |
-| 3 | Containment guess on disappearance, observed/inferred + confidence | **The wow moment**, and the most fragile code in the project |
-| 4 | Append-only log → what's where / what changed today | Cheap, and the care-partner page needs it |
-| 5 | Evidence stills | Verifiability is a safety property for this user |
-| 6 | Voice in and out, templated answers | The primary user's only interface |
-| 7 | Wrist position from the strap's marker → on-screen proximity meter | Rung 3. No calibration, so it can start on minute one |
-| 8 | Marker colour verified under demo lighting | The one part lighting can break. Two minutes early, fatal late |
-| 9 | Target resolver — a question becomes a *visible* thing to home on, plus a ceiling | The glasses are in the bag, so the band homes on the bag. Without it the core beat has nothing to point at |
-| 10 | The band: BLE, pulse = closeness × ceiling, double-pulse on found | The novelty. The found-pulse is also how guidance *ends* |
-| 11 | One care-partner page, polling, no interactivity | Second user, cheapest possible form |
+| 1 | Range test: can the cameras see the props across the room? | Decides camera placement and props. Everything below assumes the answer |
+| 2 | Camera loops, YOLO-World given the names of 5 objects + the bag | No product without it |
+| 3 | Wrist marker → on-screen proximity meter, **pixel space, one camera** | Rung 2, and the fallback if setup fails. No calibration, so it starts on minute one |
+| 4 | Marker colour verified under demo lighting | The one part lighting can break. Two minutes early, fatal late |
+| 5 | Setup: one tag in the middle, phone scan, click the tag's corners, cameras register, tape-measure check | Puts the scan and both cameras in one set of coordinates |
+| 6 | Triangulation for the wrist and for objects both cameras see; depth images from the scan for objects one camera sees | Real positions, couches included |
+| 7 | Surfaces named in the map → "on the counter" | The human-readable half of every answer |
+| 8 | Containment guess on disappearance, observed/inferred + confidence | **The wow moment**, and the most fragile code in the project |
+| 9 | Append-only log → what's where / what changed today | Cheap, and the care-partner page needs it |
+| 10 | Evidence stills | Verifiability is a safety property for this user |
+| 11 | Voice: band button → record → speech-to-text → templated answer | The primary user's only interface |
+| 12 | Target resolver — a question becomes a *visible* thing to home on, plus a ceiling | The glasses are in the bag, so the band homes on the bag. Without it the core beat has nothing to point at |
+| 13 | The band: BLE, servo rate = closeness × ceiling, double-pulse on found | The novelty. The found-pulse is also how guidance *ends* |
+| 14 | One care-partner page, polling, no interactivity | Second user, cheapest possible form |
+
+**If 5 or 6 won't come good, ship 3.** Pixel-space guidance within one camera is the whole
+demo minus walking between cameras.
+
+The full process is [DESIGN.md](./DESIGN.md) §1.
 
 ### Cut — not deferred, cut
 
@@ -251,19 +276,22 @@ thing that's flawless, when reliability *is* the demo.
 |---|---|
 | **LLM query layer** | Templated answers cover four question shapes with less latency and fewer failure modes at a loud table |
 | **Evidence clips** → stills | ~90% of the value for a fraction of the work |
-| **3D room model** | Nothing in the demo consumes it |
+| **Own iOS scanning app, RoomPlan** | An existing scan app plus clicking the tag's corners gets the same map. Surface names come from setup |
+| **Editing or re-scanning the map at runtime** | Small objects never touch it; the memory carries them |
+| **Image fingerprints for identity (re-id)** | YOLO-World's name for the object is the identity. Props are chosen so no two share a name |
+| **A tag on the band** | Both cameras triangulate the magenta marker. Add a tag only if one camera is blocked too often |
+| **Phone-in-a-pocket fallback** | iPhone web pages can't vibrate, so it's an app. The on-screen meter is the fallback |
 | **Time-series database** | Flat append-only JSON |
-| **Metric positions and all calibration** | The band works in pixel space. Optional polish, and there won't be spare time |
 | **Diff views, history scrubbing, revert flows** | Never on the demo path |
 | **Alerts, rules, hooks** | Zero value at ninety seconds |
-| **Body-pose estimation, turn-by-turn directions** | The marker and warmer/colder delete the need |
+| **Body-pose estimation, turn-by-turn directions, an arrow** | The marker and warmer/colder delete the need |
 
 **Two sponsor integrations are deliberately traded for reliability.** A flawless ninety
 seconds wins a main track; a half-working integration wins nothing. Sponsor track: **voice
 only.** Don't quietly re-add the others at 1 AM.
 
-**Stop building by late afternoon on the final day.** Then re-enroll every object in demo
-lighting at the demo camera positions and rehearse the sequence three times.
+**Stop building by late afternoon on the final day.** Then re-run setup and the range test
+in demo lighting at the demo camera positions, and rehearse the sequence three times.
 
 ---
 
@@ -356,6 +384,9 @@ driven at the moment of maximum confusion — and it finds the tag, never the un
 
 **"Isn't a camera in her home invasive?"** §6, volunteered before they ask.
 
+**"Who scans the room?"** The care partner, once, in about ten minutes: a phone scan and one
+printed tag that comes off afterwards. Objects move all day without anyone touching the map.
+
 **"Isn't the world model just a scene graph?"** Essentially yes — say it before they do.
 Robotics has better ones. None deliver to a person, none consider a cognitive deficit, none
 close the loop with an actuator a human wears.
@@ -377,8 +408,8 @@ close the loop with an actuator a human wears.
 > answer the question just *tell* her — which only works if she still remembers it when she
 > gets to the kitchen."
 >
-> **Recall.** "Cameras over her counter. They don't keep footage — they remember objects.
-> She asks out loud and it answers in a second."
+> **Recall.** "Two cameras in the corners of her room. They don't keep footage — they
+> remember objects. She taps her band, asks out loud, and it answers in a second."
 >
 > **The wow.** "And here's what no camera does: the glasses aren't in any frame. Recall
 > still knows they're in the blue bag, because it saw them go in. It tells you that's an
@@ -414,15 +445,21 @@ truth is better than their assumption.
       "repetitive questioning is among the most common behaviours," and "accusations of
       theft are common" are written from memory, not a checked source. Any dementia
       statistic needs a source or it doesn't get said. Someone in this field will know.
-- [ ] **Build the proximity meter before the strap.** Rung 3 first, always — it needs no
+- [ ] **Run `scripts/range_test.py` in the real room, hour one.** Every prop, 1–5m, at 640
+      and 1280. Where the hit rate falls below ~20/30 is the usable range.
+- [ ] **Build the proximity meter before the strap.** The meter first, always — it needs no
       calibration, so it can start on minute one against a stubbed marker position.
-- [ ] **Run onboarding in the real room early.** If furniture detection finds nothing
-      nameable, the manual-box fallback is the path and that should be known on day one.
+- [ ] **Confirm both cameras see the setup tag at once** from their demo positions, then
+      tape its outline.
+- [ ] **Scan with the surfaces cleared**, and keep the bag out of the scan — it's an object.
+- [ ] **Tape-measure the setup.** Two points on the table, map distance vs. real. Off by more
+      than a few cm → check the ARKit/OpenCV axis flip before anything else.
+- [ ] **Decide where the mic lives** — on the band, or the laptop gated by the band's button.
 - [ ] **Test marker tracking under demo lighting.** Colour thresholding is the one part
       lighting can break; the fix is a different marker colour and takes two minutes.
 - [ ] **Confirm BLE works with the laptop on venue wifi** — or with no wifi at all.
-- [ ] **Pick five visually distinct props.** Two similar dark objects produce identity
-      swaps no threshold setting fixes.
+- [ ] **Pick five visually distinct props with distinct names.** The name is the identity;
+      two similar dark objects get confused no matter the setting.
 - [ ] **Rehearse the voice path at volume** with the typed fallback one click away.
 - [ ] **Rehearse strapping the band on someone else's wrist in three seconds**, and confirm
       the pulse is unmistakable through a sleeve.
