@@ -85,6 +85,36 @@ Answer     = {text, status, confidence, still_path}
 
 ---
 
+## 2a. Props, surface and camera placement
+
+| Item | Prop | Prompt | Notes |
+|---|---|---|---|
+| keys | keys on the **red LOWELL lanyard** | `keys on a red lanyard` | strongest detection; pitch opens with keys |
+| glasses | **black-frame** glasses | `black eyeglasses` | goes into the bag in the demo |
+| remote | black Samsung TV remote | `black tv remote control` | different shape from glasses, so no swaps |
+| wallet | light-blue quilted wallet | `light blue wallet` | **backup item** — weakest contrast on cream lace |
+| bag (container) | **not blue** — brown paper bag or yellow/green tote, wide opening | set when chosen | the only container |
+
+- Background-removed photos: `data/reference/{keys,glasses,remote,wallet}.png`. Bag photo still needed.
+- **No magenta/pink props** — magenta is the band marker colour (DESIGN §7).
+- **No two props with the same colour or silhouette.** No other lanyards/badges on the demo surface.
+- **Surface:** the home table is glass with lace placemats. Lace is fine for contrast but busy;
+  bare glass reflects and scans badly. Prefer a plain white/solid cloth over the demo area.
+- **Camera:** high in the corner, tilted down 30–45°, wide FOV, aimed at the demo surface, not
+  the whole room. Bag opening faces the camera. Lock exposure, white balance and focus.
+
+## 2b. Model choice
+
+| Option | Verdict |
+|---|---|
+| **YOLO-World `yolov8s-worldv2`** (current) | Start here: open-vocabulary, no training, prompts in `items.json` |
+| **YOLO11n fine-tuned on these props** | Fallback if keys/glasses/wallet score low: ~50–100 corner-camera photos per item on the demo surface, auto-label with YOLO-World, fix boxes in Roboflow, train ~20 min. Swap the model file + class list in `perception.py`; nothing else changes |
+| COCO YOLO11n as-is | Knows remote/handbag/backpack, **not** wallet/keys/glasses |
+| ResNet | Classifier only — no boxes, so it can't say *where* |
+| SAM / SAM 3 | Overkill: heavy, and masks aren't needed for zones |
+
+---
+
 ## 3. Part A — Enrollment (built)
 
 `items.json` is the dictionary of things worth tracking. Only these are ever committed to
@@ -104,7 +134,7 @@ memory; everything else the detector sees is ignored.
 
 ```bash
 python -m recall.enroll list
-python -m recall.enroll add bag --name "blue bag" --prompt "blue bag" --container
+python -m recall.enroll add bag --name "bag" --prompt "brown paper bag" --container
 python -m recall.enroll calibrate            # all items; SPACE accept ×3, n skip, q quit
 ```
 Calibration sets `min_score = 0.6 × lowest accepted score` and saves 3 crops per item.
@@ -112,7 +142,7 @@ Calibration sets `min_score = 0.6 × lowest accepted score` and saves 3 crops pe
 
 **Identity rule:** identity = which prompt fired, one best box per item per frame. Holds
 while every tracked item is one of a kind and visually distinct. If two props swap
-identity, change the props first (PLAN §13); embedding re-id against `data/enroll/` crops
+identity, change the props first (PLAN §13); embedding re-id against `data/enroll/` + `data/reference/`
 is the fallback (§8, task 6).
 
 ---
@@ -189,9 +219,9 @@ Answer templates (`query.where_is`):
 | Status | Answer |
 |---|---|
 | observed, zone | "Your keys are on the kitchen counter — seen just now." |
-| observed, no zone | "Your phone is in view, but not in a named area — seen 2 minutes ago." |
-| inferred, container visible | "Your glasses are probably in the blue bag, on the table — inferred, last seen going in 4 minutes ago." |
-| inferred, container gone | "…probably in the blue bag, but I've lost track of the blue bag too. They went in at 2:12 PM." |
+| observed, no zone | "Your wallet is in view, but not in a named area — seen 2 minutes ago." |
+| inferred, container visible | "Your glasses are probably in the bag, on the table — inferred, last seen going in 4 minutes ago." |
+| inferred, container gone | "…probably in the bag, but I've lost track of the bag too. They went in at 2:12 PM." |
 | unknown | "Last seen on the table at 2:40 PM. I haven't seen them since." |
 | never seen | "I don't have a record of that." |
 
@@ -203,7 +233,7 @@ Goal: the camera "lives" inside the room model. One function, `pixel_to_world(u,
 the whole handoff — pass it to `Memory(..., pixel_to_world=fn)` and `xyz` fills in.
 
 ### E1. Scan → mesh
-- **Prep:** demo lighting; clear clutter; tape **3–4 printed ArUco markers** (DICT_4X4_50,
+- **Prep:** demo lighting; clear clutter; cover glass tabletops (LiDAR scans glass badly); tape **3–4 printed ArUco markers** (DICT_4X4_50,
   ~15 cm) on floor/wall where the corner camera sees them; tape-mark the origin corner.
 - **Scan:** iPhone Pro LiDAR in Polycam or Scaniverse (LiDAR mode) → export `.glb`.
   No LiDAR: phone video → MapAnything (metric) → point cloud → Open3D Poisson → mesh.
@@ -273,7 +303,7 @@ Nothing starts before the task above it passes its check.
 | 3 | **Tune** `CHANGE_FRACTION`, `MISSING_AFTER_K`, `CONTAIN_OVERLAP`, prompts on that video | Glasses→bag inferred every run; hand-over-object produces no `disappeared` |
 | 4 | **HTTP surface** (`recall/api.py`, FastAPI, **one uvicorn worker**): `GET /state`, `GET /objects/{id}/history`, `GET /changes?since=`, `POST /ask {text}`, `GET /stills/{path}`, `GET /stream` (MJPEG) — thin wrappers over `query.py` | care-partner page and voice layer can call it |
 | 5 | **Part E** E1→E4, then E6 | sanity check passes; `state.json` shows `xyz` |
-| 6 | **Only if identity swaps:** re-id — embed `data/enroll/` crops (CLIP via `open_clip`), accept a detection only if cosine ≥ 0.80 to its item, hold 0.60–0.80 | no swaps on the demo video |
+| 6 | **Only if identity swaps:** re-id — embed `data/enroll/` crops (camera view, preferred) and `data/reference/` cutouts (phone photos, starting point) with CLIP via `open_clip`, accept a detection only if cosine ≥ 0.80 to its item, hold 0.60–0.80 | no swaps on the demo video |
 | 7 | **Only if time:** E5 viewer | pins on the mesh at the right spots |
 
 Do **not** add: a database (stay on JSON/JSONL), an LLM query layer, a second camera,
