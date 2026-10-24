@@ -21,24 +21,29 @@ from urllib.parse import parse_qs, unquote, urlparse
 import cv2
 from ultralytics import YOLO
 
-# Item name -> the YOLO (COCO) labels that count as it. Plain YOLO can't see keys,
-# wallets or glasses; those need YOLO-World, which comes after this works.
+# Item name -> the phrases YOLO-World looks for. Several phrasings per item match
+# better than one. Edit this list to change what Recall watches for.
 ITEMS = {
-    "phone": ["cell phone"],
-    "remote": ["remote"],
-    "bag": ["handbag", "backpack"],
-    "cup": ["cup"],
+    "keys": ["keys", "key ring", "bunch of keys"],
+    "wallet": ["wallet", "leather wallet"],
+    "glasses": ["eyeglasses", "glasses", "sunglasses"],
+    "phone": ["cell phone", "smartphone"],
+    "remote": ["remote control", "tv remote"],
+    "bag": ["handbag", "backpack", "tote bag"],
+    "cup": ["cup", "coffee mug"],
     "book": ["book"],
-    "bottle": ["bottle"],
+    "bottle": ["water bottle", "bottle"],
 }
 # Extra words people might say for an item.
 SYNONYMS = {"cellphone": "phone", "mobile": "phone", "iphone": "phone", "purse": "bag",
-            "backpack": "bag", "handbag": "bag", "mug": "cup", "clicker": "remote"}
-CONF = 0.35
+            "backpack": "bag", "handbag": "bag", "mug": "cup", "clicker": "remote",
+            "key": "keys", "specs": "glasses", "spectacles": "glasses", "sunglasses": "glasses"}
+CONF = 0.20  # YOLO-World scores run lower than plain YOLO; 0.20 tested live
 MOVE_CONFIRM = 2  # sightings in a new room before we believe the item moved
 PORT = 8000
 
-LABEL_TO_ITEM = {label: item for item, labels in ITEMS.items() for label in labels}
+PROMPTS = [p for phrases in ITEMS.values() for p in phrases]
+PROMPT_TO_ITEM = [item for item, phrases in ITEMS.items() for _ in phrases]
 
 state = {}    # item -> {"room": str, "t": seconds}
 pending = {}  # item -> (room, count) while a move is unconfirmed
@@ -217,7 +222,8 @@ def main():
         cams.append((room.strip(), cap))
     ROOMS = [room for room, _ in cams]
 
-    model = YOLO("yolo11n.pt")
+    model = YOLO("yolov8s-worldv2.pt")
+    model.set_classes(PROMPTS)
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print(f"Recall: open http://{lan_ip()}:{PORT}  (rooms: {', '.join(ROOMS)})")
@@ -229,10 +235,8 @@ def main():
                 continue
             result = model(frame, conf=CONF, verbose=False)[0]
             now = time.time()
-            for cls in result.boxes.cls.tolist():
-                item = LABEL_TO_ITEM.get(model.names[int(cls)])
-                if item:
-                    report(room, item, now)
+            for item in {PROMPT_TO_ITEM[int(c)] for c in result.boxes.cls.tolist()}:
+                report(room, item, now)
             shown = result.plot()
             small = cv2.resize(shown, (640, int(640 * shown.shape[0] / shown.shape[1])))
             with lock:
