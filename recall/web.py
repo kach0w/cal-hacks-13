@@ -191,7 +191,8 @@ class Web:
         return {"item": name, "target": g["target"],
                 "dir": round(g["dir"]) if live else None,
                 "words": words(g["dir"], g["dist"]) if live else g["note"],
-                "metres": round(g["metres"], 1) if live and g["metres"] is not None else None}
+                "metres": round(g["metres"], 1) if live and g["metres"] is not None else None,
+                "listening": self._listening.locked()}  # the laptop mic is hearing a question, from any press
 
     # --- guidance thread -----------------------------------------------------------------
 
@@ -458,9 +459,10 @@ PAGE = """<!doctype html>
   // Ask out loud: the laptop's mic listens until you stop talking (Whisper on the laptop,
   // recall/voice.py), so this works from a phone too; press again to stop sooner. Moss on the
   // server works out which item vague wording means.
-  let listening = false;
+  let listening = false;        // this page's own question is being heard
+  let laptopListening = false;  // the laptop is hearing a question from anywhere (/guide)
   $("mic").onclick = async () => {
-    if (listening) return fetch("/listen?stop=1");
+    if (listening || laptopListening) return fetch("/listen?stop=1");
     listening = true;
     speechSynthesis.cancel();
     $("mic").classList.add("on"); $("q").value = ""; $("q").placeholder = "Listening… ask the laptop";
@@ -507,6 +509,12 @@ PAGE = """<!doctype html>
   async function guideTick() {
     try {
       const g = await (await fetch("/guide")).json();
+      // The band's button (or the terminal) can start the laptop listening too: show it on the 🎤.
+      laptopListening = g.listening;
+      if (!listening) {
+        $("mic").classList.toggle("on", g.listening);
+        $("q").placeholder = g.listening ? "Listening… ask the laptop" : "Where are my keys?";
+      }
       $("guide").hidden = !g.item;
       if (g.item) {
         const to = g.target && g.target !== g.item ? `the ${g.target} (your ${g.item} is in it)` : `your ${g.item}`;

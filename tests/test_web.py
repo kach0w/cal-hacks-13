@@ -270,3 +270,18 @@ def test_band_button_pressed_again_stops_listening(tmp_path):
     web.band_pressed()  # the second press, while it listens
     first.join(5)
     assert not first.is_alive() and "table" in said[0]
+
+
+def test_the_page_sees_the_band_button_listening(tmp_path):
+    """The 🎤 goes red for a band press too: /guide says the laptop is listening."""
+    mic = FakeMic(hold=True)
+    web = keys_on_table(tmp_path, mic)
+    web.speak = lambda text: None
+    assert web.guidance()["listening"] is False
+    pressed = threading.Thread(target=web.band_pressed)
+    pressed.start()
+    assert mic.started.wait(5)
+    assert web.guidance()["listening"] is True
+    web.stop_listening()
+    pressed.join(5)
+    assert web.guidance()["listening"] is False
