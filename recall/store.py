@@ -4,6 +4,8 @@
     events.jsonl     append-only Transitions — history, diffs and "what changed" replay this
     photos/          the annotated picture behind each transition (photo_path)
     heartbeat.json   {last_frame_ts, camera_ok}: how fresh the memory is
+
+With a database (recall/db.py, live only), every write also goes there after the file is written.
 """
 import json
 import logging
@@ -36,17 +38,22 @@ class Store:
     STATE, EVENTS, PHOTOS, HEARTBEAT = "state.json", "events.jsonl", "photos", "heartbeat.json"
     OLD_PHOTOS = "stills"  # where photos went before the DESIGN §7 rename (models.RENAMED)
 
-    def __init__(self, root):
+    def __init__(self, root, db=None):
         self.root = Path(root)
+        self.db = db  # a db.Database that gets a copy of every write, or None
 
     # --- write side (the live process) ----------------------------------------
     def save(self, state: dict[str, ObjectState], frame_ts: float):
         write_json_atomic(self.root / self.STATE, {k: o.to_dict() for k, o in state.items()})
+        if self.db:
+            self.db.state(state)
         self.beat(frame_ts)
 
     def beat(self, frame_ts: float | None, camera_ok=True):
         write_json_atomic(self.root / self.HEARTBEAT,
                           {"last_frame_ts": frame_ts, "camera_ok": camera_ok})
+        if self.db:
+            self.db.beat(frame_ts, camera_ok)
 
     def append(self, t: Transition):
         self.root.mkdir(parents=True, exist_ok=True)
@@ -58,6 +65,8 @@ class Store:
                 torn = f.read(1) != b"\n"  # a crash mid-append left half a line
         with open(p, "a") as f:
             f.write(("\n" if torn else "") + json.dumps(t.to_dict()) + "\n")
+        if self.db:
+            self.db.event(t)
 
     def save_photo(self, image, name: str) -> str:
         import cv2

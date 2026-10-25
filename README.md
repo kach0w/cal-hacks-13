@@ -113,21 +113,35 @@ TimescaleDB) as its database. The memory is naturally time-series: an append-onl
 "the keys moved from the counter to the table at 2:40 PM", and the questions people ask are
 about time ("what changed today?", "how often did the glasses go missing this week?").
 
-- **Events** go into a hypertable partitioned on time, segmented by object, so "what changed
-  since 2 PM" and per-day summaries stay fast as the history grows, and old chunks compress
-  automatically into the columnstore.
+- **Events** go into a hypertable partitioned on time and segmented by household and object, so
+  "what changed since 2 PM" and per-day summaries stay fast as the history grows. Chunks older
+  than a week move to the columnstore automatically.
 - **Current state** (one row per object: place, status, confidence, last seen) and the camera's
-  **heartbeat** are upserted alongside, so anyone with access can tell where things are and
-  whether the memory is live without reaching the laptop.
+  **heartbeat** are kept up to date alongside, so anyone with access can tell where things are
+  and whether the camera is live without reaching the laptop.
 - **Photos never leave the laptop.** Only the facts go to the database. The evidence pictures
   stay in `data/photos/`.
-- **The laptop keeps working offline.** Writes go through a local copy first and are sent to
-  Tiger Data by a background thread that retries and catches up, so a dropped connection never
-  stalls the camera loop.
+- **The camera loop never waits on the network.** The memory's files in `data/` are written
+  first; a background thread sends what changed about once a second. If the connection drops
+  it retries with backoff and, once back, resends from the newest event Tiger Data has. A
+  unique key on (household, object, kind, time) makes every resend safe.
+- **One service, many rooms.** Each install writes under its own household name
+  (`--set DB_HOME=grandmas-kitchen`, default `home`).
 
-Point Recall at a Tiger Cloud service with its connection string:
+Create a service in Tiger Console and put its connection string in `.env` (gitignored) or the
+environment. `live` then copies the memory there and makes the tables on first connect:
 
-    export DATABASE_URL="postgres://tsdbadmin:<password>@<service>.tsdb.cloud.timescale.com:<port>/tsdb?sslmode=require"
+    DATABASE_URL=postgres://tsdbadmin:<password>@<host>:<port>/tsdb?sslmode=require
+
+The care partner can ask it from any computer with the repo, no laptop needed:
+
+    .venv/bin/python -m recall.db where          # what's where, and whether the camera is live
+    .venv/bin/python -m recall.db changes 2pm    # what changed since then (default: today)
+    .venv/bin/python -m recall.db week           # per day, what each thing did, the last 7 days
+    .venv/bin/python -m recall.db sync           # send an existing data/ memory (live does it itself)
+
+Without `DATABASE_URL`, Recall runs exactly as before on the files alone. The tests use an
+in-memory fake; `RECALL_TEST_DATABASE_URL=postgres://...` also runs them against a real database.
 
 ## Running it
 
@@ -189,6 +203,7 @@ markers still up. To start the memory over, stop live and delete `data/state.jso
 | `recall/live.py`, `pipeline.py`, `camera.py`, `gate.py` | The live loop: capture thread, detection thread, change gate, frozen-camera guard |
 | `recall/perception.py`, `enroll.py` | Open-vocabulary detection and the enrolled items (`items.json`) |
 | `recall/memory.py`, `store.py`, `query.py`, `ask.py` | The memory rules, storage, and answering questions |
+| `recall/db.py` | The database copy of the memory, and the care partner's command line |
 | `recall/room.py`, `surfaces.py`, `places.py` | The scanned room: pixels to world points, named surfaces |
 | `recall/body.py`, `guide.py` | Finding the person and which way they face; the direction to the item |
 | `recall/web.py` | The web page and its HTTP routes |

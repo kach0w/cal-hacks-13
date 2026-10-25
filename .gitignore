@@ -16,5 +16,5 @@ mobileclip*.ts
 .DS_Store
 range_log.csv
 p.md
-# API keys (MOSS_PROJECT_ID / MOSS_PROJECT_KEY)
+# API keys and the database password (MOSS_PROJECT_ID / MOSS_PROJECT_KEY, DATABASE_URL)
 .env
