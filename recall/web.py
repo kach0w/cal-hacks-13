@@ -25,7 +25,6 @@ stops, nothing is sent and the band parks its arrow by itself after a second.
 import json
 import logging
 import math
-import re
 import socket
 import threading
 import time
@@ -94,7 +93,7 @@ class Web:
 
         # [tts] routes
 
-        # Moss semantic search: whether it's on, for the page and for checking a setup
+        # Moss semantic search: whether it's on, and what in the history matches a question
         self.routes["/moss"] = lambda params: self.moss_status()
         self.routes["/moss/events"] = lambda params: self.moss_events(params.get("q", [""])[0])
 
@@ -172,15 +171,15 @@ class Web:
             return {"on": False, "matches": []}
         places = self.query.places()
 
-        def words(e):  # the log's words, without the confidence number, and never surer than the memory
+        def told(e):  # the log's words, without the confidence number, and never surer than the memory
             text = self.query.describe(e, places)
             if e.kind == "inferred_contained":
-                text = re.sub(r" — inferred \(\S+\)$", "", text).replace(" went into ", " probably went into ", 1)
+                text = text.split(" — inferred")[0].replace(" went into ", " probably went into ", 1)
             return text
-        hits, ms = self.query.moss.search_events(q, self.memory.store.events(), words)
+        hits, ms = self.query.moss.search_events(q, self.memory.store.events(), told)
         return {"on": True, "ms": None if ms is None else round(ms, 1),
-                "matches": [{"t": e.ts, "time": clock(e.ts), "text": words, "score": round(score, 2)}
-                            for e, words, score in hits]}
+                "matches": [{"t": e.ts, "time": clock(e.ts), "text": text, "score": round(score, 2)}
+                            for e, text, score in hits]}
 
     def listen(self) -> dict:
         """The "Ask out loud" button: the laptop's mic hears one question, answered as ask() would, with what was
