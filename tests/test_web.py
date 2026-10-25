@@ -160,7 +160,7 @@ def test_room_guidance_keeps_showing_the_last_estimate(tmp_path):
     for t in (1, 2, 3):
         memory.update([S("keys", KEYS_TABLE)], FRAME, t)
     memory.state["keys"].xyz = [2.5, 0.45, 2.0]
-    web.room = Room(json.loads((Path(__file__).resolve().parent.parent / "data/room/camera.json").read_text()))
+    web.room = Room(json.loads((Path(__file__).resolve().parent / "fixtures/room/camera.json").read_text()))
     web.pose = type("NobodyInView", (), {"largest": lambda self, image: None})()
     web.body = Body(web.room)
     web.body.pos, web.body.yaw, web.body.seen_at = np.array([2.0, 1.5]), 0.0, time.monotonic()

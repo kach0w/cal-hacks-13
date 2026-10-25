@@ -21,11 +21,11 @@ from recall.room import Room, read_mesh
 from recall.store import Store
 from recall import surfaces as sf
 
-REAL = ROOT / "data" / "room"
+REAL = ROOT / "tests" / "fixtures" / "room"  # the first real scan, frozen
 SOFA = Surface("sofa", [3.9, 0.3, 0.7], [4.6, 1.0, 2.3])
 TABLE = Surface("coffee table", [1.8, 0.2, 0.9], [2.8, 0.9, 1.5])
 SINK = Surface("sink", [0.0, 0.8, 3.0], [0.6, 1.2, 3.6], "in")
-# The sofa and table where they really are in data/room's scan (setup_room.py's frame), for the
+# The sofa and table where they really are in that scan (setup_room.py's frame), for the
 # tests that draw on the real plan or through test_room's camera.
 SCAN_SOFA = Surface("sofa", [1.77, 0.3, 3.99], [3.37, 1.0, 4.69])
 SCAN_TABLE = Surface("coffee table", [2.57, 0.2, 1.89], [3.17, 0.9, 2.89])

@@ -1,4 +1,4 @@
-"""recall/body.py on simulated people seen through the real corner camera (data/room/camera.json):
+"""recall/body.py on simulated people seen through a real corner camera (tests/fixtures/room/camera.json):
 a skeleton stands at a known spot facing a known way, its keypoints are projected into the picture,
 and the person is placed and turned from them alone."""
 import json
@@ -11,7 +11,7 @@ import pytest
 from recall import body as B
 from recall.room import Room
 
-CAMERA = json.loads((Path(__file__).resolve().parent.parent / "data/room/camera.json").read_text())
+CAMERA = json.loads((Path(__file__).resolve().parent / "fixtures/room/camera.json").read_text())
 # (x, z) on the floor: across the scanned room, and (0, 3.5) near the camera, where the legs are out of view
 SPOTS = [(2.0, 1.5), (3.0, 2.5), (1.5, 3.0), (4.0, 0.5), (0.0, 3.5)]
 PAIRS = [(B.L_EYE, B.R_EYE), (B.L_SHOULDER, B.R_SHOULDER)]
