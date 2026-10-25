@@ -71,10 +71,17 @@ def test_rejected_credentials_mean_no_match_not_a_crash():
     assert m.match("where are my keys") is None and m.search("keys") == []
 
 
-def test_from_env_needs_credentials(monkeypatch):
+def test_from_env_needs_credentials(monkeypatch, tmp_path):
     monkeypatch.delenv("MOSS_PROJECT_ID", raising=False)
     monkeypatch.delenv("MOSS_PROJECT_KEY", raising=False)
+    monkeypatch.setattr(moss_search, "ENV_FILE", tmp_path / ".env")
     assert MossSearch.from_env(ITEMS) is None
+
+
+def test_read_env(tmp_path):
+    (tmp_path / ".env").write_text('# moss\nexport MOSS_PROJECT_ID="abc"\nMOSS_PROJECT_KEY=k=1\n\n')
+    assert moss_search.read_env(tmp_path / ".env") == {"MOSS_PROJECT_ID": "abc", "MOSS_PROJECT_KEY": "k=1"}
+    assert moss_search.read_env(tmp_path / "missing") == {}
 
 
 def test_handle_uses_moss_only_when_exact_words_miss(tmp_path):
