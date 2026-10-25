@@ -89,7 +89,10 @@ class Web:
         self.routes = {}
         # [care] routes
 
-        # [week] routes
+        # [week] Tiger Data: this week, from the database (a continuous aggregate) or this laptop's files
+        from .db import week
+        self.routes["/week"] = lambda params: week(
+            self.memory.store, {oid: it.name for oid, it in self.items.items()})
 
         # [tts] routes
 
@@ -589,7 +592,34 @@ PAGE = """<!doctype html>
   }
   /* [care] styles */
 
-  /* [week] styles */
+  /* [week] Tiger Data: this week's grid */
+  .week-scroll { overflow-x: auto; padding: 14px 22px 4px; }
+  .week-scroll:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; border-radius: var(--r-l); }
+  .week-grid { border-collapse: separate; border-spacing: 4px; margin: 0 -4px; width: calc(100% + 8px); min-width: 25rem; table-layout: fixed; }
+  .week-grid th { font-weight: 600; text-align: left; overflow-wrap: anywhere; }
+  .week-grid thead th { color: var(--muted); font-size: .8125rem; font-weight: 600; text-align: center; padding-bottom: 2px; white-space: nowrap; }
+  .week-grid thead th.today { color: var(--fg); }
+  .week-grid col.thing { width: 6.5rem; }
+  .week-grid tbody th { font-size: .9375rem; padding-right: 6px; line-height: 1.25; }
+  .week-grid tbody th, .week-grid thead th:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface);
+                                                        box-shadow: 4px 0 0 var(--surface); }
+  .week-grid td { height: 36px; text-align: center; font-weight: 650; font-variant-numeric: tabular-nums;
+                  border-radius: var(--r-s); background: var(--sunken); }
+  .week-grid td[data-n="1"] { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); }
+  .week-grid td[data-n="2"] { background: color-mix(in srgb, var(--accent) 40%, var(--surface)); }
+  .week-grid td[data-n="3"] { background: color-mix(in srgb, var(--accent) 62%, var(--surface)); }
+  .week-spots { padding: 6px 22px 14px; }
+  .week-spots li { padding: 8px 0; font-size: .9375rem; }
+  .week-spots li + li { border-top: 1px solid var(--line); }
+  .week-spots b { font-weight: 650; }
+  .week-empty { color: var(--muted); padding: 18px 22px; }
+  .week-key { border-top: 1px solid var(--line); padding: 12px 22px; font-size: .875rem; color: var(--muted); }
+  @media (max-width: 900px) { #weekBox { order: 6; } }
+  @media (max-width: 640px) {
+    .week-scroll { padding: 12px 18px 4px; }
+    .week-spots, .week-empty { padding-left: 18px; padding-right: 18px; }
+    .week-key { padding: 12px 18px; }
+  }
 
   /* [moss] styles */
 
@@ -670,7 +700,18 @@ PAGE = """<!doctype html>
       <div class="card"><ol class="log" id="log"><li class="empty">Nothing has moved yet.</li></ol></div>
     </section>
 
-    <!-- [week] panel -->
+    <!-- [week] Tiger Data: how often each thing went out of sight, per day -->
+    <section id="weekBox" aria-labelledby="weekH">
+      <div class="sec-head"><h2 id="weekH">This week</h2><p class="muted" id="weekSrc"></p></div>
+      <div class="card" aria-live="polite" aria-busy="true" id="weekCard">
+        <p class="week-empty" id="weekMsg">Loading</p>
+        <div class="week-scroll" id="weekScroll" role="region" aria-label="Times each thing went out of sight, by day" tabindex="0" hidden>
+          <table class="week-grid" id="weekGrid"></table>
+        </div>
+        <ul class="week-spots" id="weekSpots" hidden></ul>
+        <p class="week-key" id="weekKey" hidden>Each number is how many times it went out of sight that day.</p>
+      </div>
+    </section>
 
   </div>
 </main>
@@ -885,7 +926,52 @@ PAGE = """<!doctype html>
   };
   // [care] script
 
-  // [week] script
+  // [week] Tiger Data: this week, from the database when the laptop has one (recall/db.py week())
+  const weekday = (iso, i, n) => i === n - 1 ? "Today"
+    : new Date(iso + "T12:00:00").toLocaleDateString([], { weekday: "short" });
+  const times = n => n === 1 ? "once" : n === 2 ? "twice" : n + " times";
+  const spot = s => s.container ? "into the " + s.container + (s.place ? " on the " + s.place : "")
+    : s.place ? "on the " + s.place : "outside the named places";
+  let lastWeek = null;
+  async function weekTick() {
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 8000);
+    try {
+      const r = await fetch("/week", { signal: ctl.signal });
+      if (!r.ok) throw new Error(r.status);
+      const w = await r.json(), key = JSON.stringify(w);
+      if (key !== lastWeek) {
+        lastWeek = key;
+        $("weekSrc").textContent = w.source === "database" ? "From the database" : "From this laptop";
+        const any = w.items.some(it => it.per_day.some(n => n));
+        $("weekMsg").hidden = any;
+        $("weekMsg").textContent = "Nothing went out of sight this week.";
+        $("weekScroll").hidden = $("weekKey").hidden = !any;
+        const n = w.days.length;
+        $("weekGrid").innerHTML = `<colgroup><col class="thing">${"<col>".repeat(n)}</colgroup>` +
+          `<thead><tr><th scope="col"><span class="vh">Thing</span></th>` +
+          w.days.map((d, i) => `<th scope="col"${i === n - 1 ? ' class="today"' : ""}>${esc(weekday(d, i, n))}</th>`).join("") + `</tr></thead><tbody>` +
+          w.items.filter(it => it.per_day.some(n => n)).map(it => `<tr><th scope="row">${esc(cap(it.name))}</th>` +
+            it.per_day.map(c => `<td data-n="${Math.min(c, 3)}">${c || '<span class="vh">none</span>'}</td>`).join("") + `</tr>`).join("") +
+          `</tbody>`;
+        $("weekScroll").scrollLeft = $("weekScroll").scrollWidth;  // a narrow screen opens on today
+        const by = {};
+        for (const s of w.spots) (by[s.name] = by[s.name] || []).push(s);
+        // "Usually" once something has gone missing more than once; before that, just where it went.
+        const lines = Object.keys(by).map(name => `<li><b>${esc(cap(name))}</b>: ` +
+          (by[name].some(s => s.times > 1) ? `usually ${/s$/.test(name) ? "go" : "goes"} missing ` : "went missing ") +
+          by[name].slice(0, 3).map(s => esc(spot(s)) + " (" + times(s.times) + ")").join(", ") + `</li>`);
+        $("weekSpots").innerHTML = lines.join("");
+        $("weekSpots").hidden = !lines.length;
+      }
+    } catch (e) {
+      if (lastWeek === null) $("weekMsg").textContent = "Couldn't load this week yet. Trying again soon.";
+    } finally {
+      clearTimeout(timer);
+      $("weekCard").setAttribute("aria-busy", "false");
+    }
+    setTimeout(weekTick, 30000);
+  }
+  weekTick();
 
   // [moss] script
 
