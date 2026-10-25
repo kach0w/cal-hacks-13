@@ -33,10 +33,10 @@ from urllib.parse import parse_qs, urlparse
 
 import cv2
 
-from .ask import find_item, handle
+from .ask import find_item_info, handle
 from .band import connect as connect_band
 from .body import Body, PoseModel, draw
-from .moss_search import MossSearch
+from .moss_search import MODEL as MOSS_MODEL, MossSearch, wording
 from .guide import SHOULDER_M, Guide, words
 from .overlay import live_view
 from .query import Query, clock
@@ -93,8 +93,8 @@ class Web:
 
         # [tts] routes
 
-        # [moss] routes
-
+        # Moss semantic search: whether it's on, for the page and for checking a setup
+        self.routes["/moss"] = lambda params: self.moss_status()
 
     def _send_band(self, deg, dist):
         """Sends a turn to the band; returns the direction it was sent."""
@@ -143,11 +143,23 @@ class Web:
             a = handle(text, self.query)
         except ValueError as e:
             return {"answer": str(e), "status": "info"}
-        oid = find_item(self.query, text)
+        t = text.strip().lower()  # as handle() asks, so Moss answers both from one query
+        oid, understood = find_item_info(self.query, t)
         if oid and a.status in ("observed", "inferred", "unknown"):
             with self._lock:
                 self.guiding.update(item=oid, since=time.time(), dir=None, target=None, note=None)
-        return {"answer": a.text, "status": a.status}
+        r = {"answer": a.text, "status": a.status}
+        # Moss: when it (not the exact words) worked out the item, the page says how it understood
+        if understood and (a.status != "info" or t.startswith("history")):
+            r["understood"] = {**understood, "name": self.query.name(oid), "words": wording(text)}
+        return r
+
+    def moss_status(self) -> dict:
+        """Never waits: an index still building reads as not ready."""
+        m = self.query.moss
+        if m is None:
+            return {"on": False}
+        return {"on": True, "ready": m.ready(0), "model": MOSS_MODEL, "min_score": m.min_score}
 
     def listen(self) -> dict:
         """The "Ask out loud" button: the laptop's mic hears one question, answered as ask() would, with what was
@@ -591,7 +603,8 @@ PAGE = """<!doctype html>
 
   /* [week] styles */
 
-  /* [moss] styles */
+  /* Moss semantic search: how vague wording was understood, under the answer */
+  .understood { margin-top: 12px; color: var(--muted); font-size: .9375rem; overflow-wrap: anywhere; }
 
 </style></head>
 <body>
@@ -704,9 +717,11 @@ PAGE = """<!doctype html>
     $("badge").textContent = LABEL[status] || "";
     $("heard").textContent = meta || "";
     $("answer").textContent = text;
+    understood(null);
   };
   const show = (r, meta) => {
     card("answer", r.answer || "Ask where something is.", meta, r.status);
+    understood(r.understood);
     say(r.answer, true);
   };
 
@@ -887,7 +902,14 @@ PAGE = """<!doctype html>
 
   // [week] script
 
-  // [moss] script
+  // Moss semantic search: when Moss (not the exact words) worked out which thing was meant, one
+  // quiet line under the answer says how, so a care partner can tell if it heard wrong.
+  $("answerCard").insertAdjacentHTML("beforeend", '<p class="understood" id="understood" hidden></p>');
+  function understood(u) {
+    const el = $("understood");
+    el.hidden = !u;
+    el.textContent = u ? `Understood “${u.words}” as ${u.name} (Moss, ${Math.max(1, Math.round(u.ms))} ms)` : "";
+  }
 
   tick(); guideTick(); camTick();
 </script>
