@@ -47,7 +47,7 @@ ITEMS_FILE = os.path.join(os.path.dirname(__file__), "items.json")
 DETECT_EVERY = 5  # run the object detector every Nth frame; objects sit still
 DETECT_IMGSZ = 640
 DETECT_CONF = 0.15
-SERVO_FORWARD, SERVO_REST, SERVO_REVERSED = 90, 120, True  # keep in sync with band.ino
+SERVO_FORWARD, SERVO_REST, SERVO_REVERSED = 90, 180, True  # keep in sync with band.ino
 
 target = None
 guide_name = None  # object we're guiding to, chosen with keys 1-9
