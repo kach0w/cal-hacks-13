@@ -33,8 +33,10 @@ glasses, phone, the TV remote. It doesn't keep footage. It keeps *what's where, 
   the arrow toward the item (or the bag it's in). The arrow keeps pointing after the answer is
   forgotten, which is exactly the failure the condition guarantees.
 - **The care partner gets a page.** On any phone or laptop on the wifi: where each thing is, how
-  sure Recall is, whether the camera is live, and a timeline of everything that moved today. That
-  turns "is she okay?" into something answerable without a phone call that feels like checking up.
+  sure Recall is, whether the camera is live, a timeline of everything that moved today, and a
+  week of how often each thing went out of sight and where. The family can also ask in their own
+  words ("did Mum lose her glasses again today?") and Claude answers from the memory. That turns
+  "is she okay?" into something answerable without a phone call that feels like checking up.
 
 And it never gets tired of the question. The ninth "where's my wallet" before lunch gets the same
 calm answer as the first.
@@ -60,12 +62,29 @@ stops sending frames, the memory freezes instead of deciding everything vanished
 of every object and the camera's heartbeat. That's what makes "what changed today?" and "how often
 did the glasses go missing this week?" one query, and it means the history is there for the care
 partner even when they're not in the house. Photos never leave the laptop: only the facts are
-stored.
+stored. Events go into a TimescaleDB hypertable, and a continuous aggregate (`recall_daily`) keeps
+per-day counts for the page's "This week" panel. A benchmark over about 900,000 synthetic events
+(TimescaleDB in Docker on a laptop) showed the columnstore 83% smaller and a month-long summary
+across 200 households about 10x faster from the aggregate.
 
 **Asking.** Speech-to-text runs on the laptop with faster-whisper and Silero VAD. Exact item names
 are matched instantly; vague wording ("the thing I open the front door with") goes to Moss
-semantic search, which picks the item it means. Answers are templated, not generated, so they're
-fast and can't make anything up.
+semantic search, which picks the item it means. The answers spoken to the person are templated,
+not generated, so they're fast and can't make anything up. With a Cartesia key they're spoken in a
+calm, slightly slow Sonic voice, cached by sentence; without one, or if it's slow, the laptop's and
+browser's own voices take over.
+
+**Ask about the day.** The care partner's questions are different, so they get a different tool.
+A card on the page sends them to Claude, which reads the memory through five tools that wrap our
+existing query code (where something is, what changed since a time, one thing's history, how
+often things went missing). Every tool result keeps the memory's own "seen" and "probably", and
+the page shows what Claude looked at under each answer. These answers are shown to the family,
+never spoken to the person. Claude gets text facts only, never a picture.
+
+Honestly: the Claude and Cartesia parts are tested against fakes and local stand-in servers, not
+yet with live keys. Moss's item matching was checked against real Moss; its newer parts (the
+"Understood" line, "when" questions) only against a fake. Without a key each one switches off
+cleanly and the rest of Recall works the same.
 
 **Guiding.** A YOLO11 pose model finds the person's shoulders. One camera can't see depth, but a
 point at a known height can be placed: we put the shoulders at the person's shoulder height in the
@@ -78,7 +97,8 @@ arrow, wiggles when you've arrived, and centres itself if packets stop, because 
 a lie. The button asks a question through the laptop's mic.
 
 **The page.** A dependency-free web page served by the laptop: an ask box, a live compass dial
-while guiding, the live camera, the "where things are" board in plain words, and the timeline.
+while guiding, the live camera, the "where things are" board in plain words, the timeline, the
+"This week" panel and the "Ask about the day" card.
 
 ## Challenges we ran into
 
@@ -114,8 +134,9 @@ while guiding, the live camera, the "where things are" board in plain words, and
   all in the same coordinates.
 - **Honest by construction.** Seen and inferred are separate all the way from the memory rules to
   the spoken answer, the page and the band.
-- **It runs on a laptop.** Detection, speech-to-text and pose all run locally; the room scan and
-  the photos never leave the house.
+- **It runs on a laptop.** Detection, speech-to-text and pose all run locally, and the room scan
+  and the photos never leave the house. The optional services get text only: events for the
+  database, the family's questions and short facts for Claude, the spoken sentences for Cartesia.
 
 ## What we learned
 
