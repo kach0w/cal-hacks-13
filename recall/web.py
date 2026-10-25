@@ -6,12 +6,14 @@ guidance to the item asked about.
 Runs inside live (it needs the newest frame and the memory), on its own threads:
   - an HTTP server (stdlib, no extra dependencies)
   - a guidance thread: while someone is being guided, finds them with a pose model and points
-    them at the item, or at its container when the memory says it went into one.
+    them at the item, or at its container when the memory says it went into one. With the room
+    registered this happens in the scanned room (recall/body.py), else in the picture (guide.py).
 
 Routes: /  /state  /ask?q=  /guide  /cam.jpg  /photo/<path>
 
 With --band, every guidance update also goes to the necklace (firmware/band) as a UDP
-packet "dir,dist": dir in degrees, + = to the person's right; dist 0..100. When guidance
+packet "dir,dist": dir in degrees, + = to the person's right; dist 0..100. The servo reaches
+±90, so further round the arrow waves at that side's edge: 'turn around, this way'. When guidance
 stops, nothing is sent and the band parks its arrow by itself after a second.
 """
 import json
@@ -26,6 +28,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import cv2
 
 from .ask import handle, match_item
+from .body import Body, PoseModel, draw
 from .guide import SHOULDER_M, Guide, words
 from .overlay import live_view
 from .query import Query, clock
@@ -34,9 +37,24 @@ log = logging.getLogger("recall")
 
 PORT = 8000
 GUIDE_FOR_S = 60       # stop guiding this long after a question
-GUIDE_EVERY_S = 0.15   # how often the guidance thread looks
+GUIDE_EVERY_S = 0.1    # pause between the guidance thread's looks
 BAND_PORT = 4210       # firmware/band/band.ino listens here
+BAND_RETRY_S = 5       # look the band up again this often until it's on the wifi
+BAND_HOLD_S = 1.5      # person lost for a moment: keep sending the last direction this long
+BAND_BEHIND_DEG = 150  # further round than this either way, the band keeps the side it was on
+BAND_REACH_DEG = 90    # the servo's travel each side of ahead (firmware/band)
+BAND_WAVE_DEG = 30     # past its reach the arrow swings between the edge and this far in from it
 CAM_WIDTH = 960        # the page's camera picture
+
+
+def band_dir(deg, side):
+    """(direction to send the band, the side it's on now: +1 right, -1 left). The band's servo
+    reaches ±90, so anything further round sits at that side's edge. Straight behind, a few
+    degrees of wobble flip the turn between +179 and -179, which would swing the arrow edge to edge
+    each time: past BAND_BEHIND_DEG it keeps to the side it was on."""
+    if side and abs(deg) > BAND_BEHIND_DEG and math.copysign(1, deg) != side:
+        deg = -deg
+    return deg, math.copysign(1, deg)
 
 
 class Web:
@@ -45,18 +63,53 @@ class Web:
         self.places, self.room = places, room
         self.query = Query(cfg, items, memory.store)
         self.guide = None  # the pose model loads on the first question, not at start-up
+        self.pose = self.body = None  # the same, for guidance in the room
         self._lock = threading.Lock()
         self.guiding = {"item": None, "since": 0.0, "dir": None, "dist": 100, "metres": None,
-                        "target": None, "t": 0.0}
+                        "target": None, "note": None, "t": 0.0}
         self.cam_jpg = None
-        self.band = None  # (ip, port) of the necklace, if --band was given
-        if band:
+        self.band_host = band
+        self.band = None  # (ip, port) of the necklace once --band's host is found
+        self.band_side = 0  # band_dir's side, 0 before anything is sent
+        self._waving = False  # which end of the wave the last packet past the servo's reach was
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    def _find_band(self):
+        """Looks the band up until it answers: it may join the wifi after we start."""
+        warned = False
+        while self.band is None:
             try:
-                self.band = (socket.gethostbyname(band), BAND_PORT)
+                self.band = (socket.gethostbyname(self.band_host), BAND_PORT)
                 log.info("band: sending guidance to %s:%d", *self.band)
             except OSError:
-                log.warning("band: can't find %s; guidance stays on the page only", band)
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                if not warned:
+                    log.warning("band: can't find %s yet; guidance stays on the page until it's on the wifi",
+                                self.band_host)
+                    warned = True
+                time.sleep(BAND_RETRY_S)
+
+    def _send_band(self, deg, dist):
+        """Sends a turn to the band; returns the direction it was sent."""
+        deg, self.band_side = band_dir(deg, self.band_side)
+        if abs(deg) > BAND_REACH_DEG:
+            # The servo can't point there and would sit still at its edge (the left edge is also
+            # where it rests): wave at that edge instead, a step per packet.
+            deg = math.copysign(BAND_REACH_DEG - BAND_WAVE_DEG * self._waving, deg)
+            self._waving = not self._waving
+        if self.band:
+            try:
+                self._sock.sendto(f"{int(round(deg))},{int(dist)}".encode(), self.band)
+            except OSError:  # band off or out of range: the page keeps guiding
+                pass
+        return deg
+
+    def _hold(self):
+        """The person was lost for a moment (a hidden shoulder, someone walking past): repeat the last
+        direction for BAND_HOLD_S, so the band doesn't drop to rest and swing back."""
+        with self._lock:
+            deg, dist, t = self.guiding["dir"], self.guiding["dist"], self.guiding["t"]
+        if deg is not None and time.time() - t < BAND_HOLD_S:
+            self._send_band(deg, dist)
 
     # --- what the page reads -------------------------------------------------------------
 
@@ -88,7 +141,7 @@ class Web:
         oid = match_item(self.items, text)
         if oid and a.status in ("observed", "inferred", "unknown"):
             with self._lock:
-                self.guiding.update(item=oid, since=time.time(), dir=None, target=None)
+                self.guiding.update(item=oid, since=time.time(), dir=None, target=None, note=None)
         return {"answer": a.text, "status": a.status, "photo": a.photo_path}
 
     def guidance(self) -> dict:
@@ -98,7 +151,7 @@ class Web:
         name = self.items[g["item"]].name if g["item"] else None
         return {"item": name, "target": g["target"],
                 "dir": round(g["dir"]) if live else None,
-                "words": words(g["dir"], g["dist"]) if live else None,
+                "words": words(g["dir"], g["dist"]) if live else g["note"],
                 "metres": round(g["metres"], 1) if live and g["metres"] is not None else None}
 
     # --- guidance thread -----------------------------------------------------------------
@@ -114,6 +167,16 @@ class Web:
             return c.last_bbox, c.name
         return o.last_bbox, o.name
 
+    def _target_xyz(self, oid):
+        """(world point, name) to point at in the room, like _target; None without a room position."""
+        st = self.memory.state
+        o = st.get(oid)
+        if o is None:
+            return None
+        if o.status == "inferred" and o.container in st and st[o.container].xyz is not None:
+            o = st[o.container]
+        return (o.xyz, o.name) if o.xyz is not None else None
+
     def _guide_loop(self):
         while True:
             time.sleep(GUIDE_EVERY_S)
@@ -126,20 +189,55 @@ class Web:
         r = self.pipeline.latest()
         if r is None:
             return
-        shown = live_view(r.frame.image, r, self.places, self.memory.state, self.items, room=self.room)
+        # The newest camera frame: r.frame is the one detection last looked at, once per LOOP_S,
+        # and guiding on it froze the arrow for a second at a time.
+        frame = (self.pipeline.source.read() if self.pipeline.source.live else None) or r.frame
+        shown = live_view(frame.image, r, self.places, self.memory.state, self.items, room=self.room)
         with self._lock:
             oid = self.guiding["item"]
             if oid and time.time() - self.guiding["since"] > GUIDE_FOR_S:
                 self.guiding["item"] = oid = None
         if oid:
-            self._point(oid, r.frame.image, shown)
+            self._point(oid, frame.image, shown)
         h, w = shown.shape[:2]
         small = cv2.resize(shown, (CAM_WIDTH, int(CAM_WIDTH * h / w)))
         jpg = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 70])[1].tobytes()
         with self._lock:
             self.cam_jpg = jpg
 
+    def _point_in_room(self, oid, image, shown):
+        """Guidance in the scanned room: the person and the item as world points (recall/body.py)."""
+        found = self._target_xyz(oid)
+        with self._lock:
+            self.guiding["note"] = None if found else f"I don't know where in the room the {self.items[oid].name} is"
+        if found is None:
+            return
+        xyz, target_name = found
+        if self.pose is None:
+            self.pose, self.body = PoseModel(), Body(self.room, self.cfg.shoulder_height_m, self.cfg.guide_smooth)
+        person = self.pose.largest(image)
+        seen = person is not None and self.body.update(*person)
+        if not seen:
+            self._hold()
+            log.debug("guide: lost this look: %s", "nobody found" if person is None else self.body.lost)
+            if self.body.pos is None:
+                cv2.putText(shown, "looking for you", (16, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 200, 255), 2)
+                return
+        deg, dist, metres = self.body.turn(xyz)
+        title = f"{target_name}: {words(deg, dist)}"
+        if seen:
+            with self._lock:
+                self.guiding.update(dir=deg, dist=dist, metres=metres, target=target_name, t=time.time())
+            sent = self._send_band(deg, dist)
+            log.debug("guide: at (%.2f, %.2f) facing %+4.0f (%s; nose %.2f eye %.2f)  turn %+4.0f  band %+4.0f  %.1f m",
+                      *self.body.pos, math.degrees(self.body.yaw), self.body.why, *self.body.face, deg, sent, metres)
+        else:  # keep showing the last estimate rather than nothing
+            title += f"  (seen {time.monotonic() - self.body.seen_at:.1f} s ago)"
+        draw(shown, self.room, self.body, xyz, title, deg, metres)
+
     def _point(self, oid, image, shown):
+        if self.room is not None:
+            return self._point_in_room(oid, image, shown)
         found = self._target(oid)
         if found is None:
             return
@@ -147,6 +245,7 @@ class Web:
         if self.guide is None:
             self.guide = Guide()
         if not self.guide.update(image):
+            self._hold()
             cv2.putText(shown, "face the camera for a second", (16, 40), cv2.FONT_HERSHEY_SIMPLEX,
                         1, (0, 200, 255), 2)
             return
@@ -154,16 +253,13 @@ class Web:
         h, w = image.shape[:2]
         result = self.guide.toward(target, math.hypot(w, h))
         if result is None:
+            self._hold()
             return
         deg, dist = result
         metres = self.guide.metres(target)
         with self._lock:
             self.guiding.update(dir=deg, dist=dist, metres=metres, target=target_name, t=time.time())
-        if self.band:
-            try:
-                self._sock.sendto(f"{int(round(deg))},{int(dist)}".encode(), self.band)
-            except OSError:  # band off or out of range: the page keeps guiding
-                pass
+        self._send_band(deg, dist)
 
         body = tuple(int(v) for v in self.guide.body)
         tip = tuple(int(v) for v in self.guide.body + self.guide.facing * 100)
@@ -224,6 +320,8 @@ class Web:
         server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
         threading.Thread(target=server.serve_forever, name="web", daemon=True).start()
         threading.Thread(target=self._guide_loop, name="guidance", daemon=True).start()
+        if self.band_host:
+            threading.Thread(target=self._find_band, name="band", daemon=True).start()
         url = f"http://{lan_ip()}:{server.server_address[1]}"  # port 0 = any free port (tests)
         log.info("web page: %s", url)
         return url
