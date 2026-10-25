@@ -641,7 +641,7 @@ PAGE = """<!doctype html>
   .care-out[data-state="off"] .care-text { color: var(--muted); }
   .care-out[data-state="error"] .care-text { font-weight: 600; }
   .care-looked { color: var(--muted); font-size: .875rem; margin-top: 10px; overflow-wrap: anywhere; }
-  @media (max-width: 900px) { #careBox { order: 2; } }
+  @media (max-width: 900px) { #careBox { order: 7; } }  /* family card last: the board stays under the answer */
   @media (max-width: 640px) { .care { padding: 16px; } }
 
   /* [week] Tiger Data: this week's grid */
@@ -707,23 +707,6 @@ PAGE = """<!doctype html>
       </div>
     </section>
 
-    <!-- [care] Ask about the day: Claude, for family -->
-    <section id="careBox" aria-labelledby="careH">
-      <div class="sec-head"><h2 id="careH">Ask about the day</h2><p class="muted">For family. Claude reads the memory and answers. Not spoken aloud.</p></div>
-      <div class="card care">
-        <form id="careForm">
-          <label for="careQ" class="vh">Ask Claude about the day</label>
-          <input id="careQ" placeholder="Did the glasses go missing today?" autocomplete="off" enterkeyhint="go">
-          <button type="submit" class="primary" id="careAsk">Ask</button>
-          <button type="button" class="secondary" id="careNote">Today's note</button>
-        </form>
-        <div class="care-out" id="careOut" data-state="empty" aria-live="polite" hidden>
-          <p class="care-text" id="careText"></p>
-          <p class="care-looked" id="careLooked" hidden></p>
-        </div>
-      </div>
-    </section>
-
     <section class="card guide" id="guide" hidden aria-label="Directions">
       <div class="dial">
         <svg viewBox="0 0 200 200" aria-hidden="true" id="dialFace"><circle class="face" cx="100" cy="100" r="98"/>
@@ -778,6 +761,23 @@ PAGE = """<!doctype html>
         </div>
         <ul class="week-spots" id="weekSpots" hidden></ul>
         <p class="week-key" id="weekKey" hidden>Each number is how many times it went out of sight that day.</p>
+      </div>
+    </section>
+
+    <!-- [care] Ask about the day: Claude, for family -->
+    <section id="careBox" aria-labelledby="careH">
+      <div class="sec-head"><h2 id="careH">Ask about the day</h2><p class="muted">For family. Claude reads the memory and answers. Not spoken aloud.</p></div>
+      <div class="card care">
+        <form id="careForm">
+          <label for="careQ" class="vh">Ask Claude about the day</label>
+          <input id="careQ" placeholder="Did the glasses go missing today?" autocomplete="off" enterkeyhint="go">
+          <button type="submit" class="primary" id="careAsk">Ask</button>
+          <button type="button" class="secondary" id="careNote">Today's note</button>
+        </form>
+        <div class="care-out" id="careOut" data-state="empty" aria-live="polite" hidden>
+          <p class="care-text" id="careText"></p>
+          <p class="care-looked" id="careLooked" hidden></p>
+        </div>
       </div>
     </section>
 
