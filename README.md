@@ -128,29 +128,6 @@ resolved to an item by Moss semantic search.
   ahead of time so they play instantly, and if Cartesia is slow or unreachable Recall falls back
   to the built-in voice.
 
-## The database: Tiger Data
-
-Recall uses [Tiger Data](https://www.tigerdata.com) (Tiger Cloud: managed Postgres with
-TimescaleDB) as its database. The memory is naturally time-series: an append-only stream of
-"the keys moved from the counter to the table at 2:40 PM", and the questions people ask are
-about time ("what changed today?", "how often did the glasses go missing this week?").
-
-- **Events** go into a hypertable partitioned on time, segmented by object, so "what changed
-  since 2 PM" and per-day summaries stay fast as the history grows, and old chunks compress
-  automatically into the columnstore.
-- **Current state** (one row per object: place, status, confidence, last seen) and the camera's
-  **heartbeat** are upserted alongside, so anyone with access can tell where things are and
-  whether the memory is live without reaching the laptop.
-- **Photos never leave the laptop.** Only the facts go to the database. The evidence pictures
-  stay in `data/photos/`.
-- **The laptop keeps working offline.** Writes go through a local copy first and are sent to
-  Tiger Data by a background thread that retries and catches up, so a dropped connection never
-  stalls the camera loop.
-
-Point Recall at a Tiger Cloud service with its connection string:
-
-    export DATABASE_URL="postgres://tsdbadmin:<password>@<service>.tsdb.cloud.timescale.com:<port>/tsdb?sslmode=require"
-
 ## Running it
 
 ### From a fresh clone
