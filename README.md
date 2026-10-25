@@ -106,6 +106,28 @@ counts when it's clearly louder than the room's usual level, and the phrases Whi
 noise are never sent as questions. Vague wording ("the thing I open the front door with") is
 resolved to an item by Moss semantic search.
 
+## Built with our sponsors
+
+- **Tiger Data:** Recall's memory is time-series data, so every change (moved, disappeared,
+  went into the bag) is an event in a TimescaleDB hypertable on Tiger Data. A real-time continuous
+  aggregate keeps per-day counts behind the care partner's "This week" panel, and "where do the
+  glasses usually go missing?" is one SQL query. In our local benchmark over 900,000 synthetic
+  events, compression made the data 83% smaller and a month-long summary ran in 29 ms from the
+  aggregate instead of 357 ms from raw events.
+- **Moss:** people don't name things the way a database does. Exact item names are matched
+  instantly, and vague wording like "the thing I open the front door with" goes to Moss semantic
+  search, which works out it means the keys. The page shows how Moss understood the question,
+  so a care partner can tell if it heard wrong.
+- **Claude (Anthropic):** "Ask about the day" is for the care partner, not the person with
+  dementia. Claude answers questions like "did the glasses go missing today?" and writes a short
+  daily note. It reads the memory only through tools, cites times, keeps "seen" apart from
+  "probably", and says when it doesn't know. The person living with dementia still gets the same
+  short, templated, local answers.
+- **Cartesia:** everything Recall tells the person is spoken, so the voice matters. Answers and
+  directions like "To your left" are spoken in a calm Cartesia Sonic voice. Directions are made
+  ahead of time so they play instantly, and if Cartesia is slow or unreachable Recall falls back
+  to the built-in voice.
+
 ## The database: Tiger Data
 
 Recall uses [Tiger Data](https://www.tigerdata.com) (Tiger Cloud: managed Postgres with
