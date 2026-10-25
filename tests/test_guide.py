@@ -17,7 +17,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-import guide as G  # noqa: E402
+from recall import guide as G  # noqa: E402
 
 BODY = np.array([640.0, 300.0])
 WIDTH = 200.0   # shoulder width squarely facing the camera, at scale 1

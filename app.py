@@ -1,11 +1,11 @@
-"""Recall, simplest version.
+"""Recall, simplest version (app.py; the full pipeline is the recall/ package).
 
 One camera per room. YOLO watches for a short list of items and remembers which room
 each one was last seen in. A web page shows the board, a log of moves (newest at the
 bottom), and answers "where is my phone?" out loud. If the item is in the first room,
 the page then points the person to it: left, right, or straight ahead.
 
-    .venv/bin/python recall.py          # camera 0 = the living room
+    .venv/bin/python app.py          # camera 0 = the living room
     then open the printed link on any device on the same wifi
 
 Stop with Ctrl+C.
@@ -23,7 +23,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import cv2
 from ultralytics import YOLO
 
-from guide import SHOULDER_M, Guide, words
+from recall.guide import SHOULDER_M, Guide, words
 
 # Item name -> the phrases YOLO-World looks for. Several phrasings per item match
 # better than one. Edit this list to change what Recall watches for.
