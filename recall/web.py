@@ -84,6 +84,17 @@ class Web:
         self.speak = speak  # says the band button's answers on the laptop (macOS say)
         self._listening = threading.Lock()  # one question at a time from the page
         self._stop_listening = threading.Event()
+        # More GET routes: path -> fn(query params, as parse_qs gives them) -> a dict (sent as JSON)
+        # or (body bytes, content type). Each integration registers its own below.
+        self.routes = {}
+        # [care] routes
+
+        # [week] routes
+
+        # [tts] routes
+
+        # [moss] routes
+
 
     def _send_band(self, deg, dist):
         """Sends a turn to the band; returns the direction it was sent."""
@@ -345,6 +356,9 @@ class Web:
                     with web._lock:
                         jpg = web.cam_jpg
                     self._send(jpg, "image/jpeg") if jpg else self.send_error(404)
+                elif url.path in web.routes:
+                    out = web.routes[url.path](parse_qs(url.query))
+                    self._json(out) if isinstance(out, dict) else self._send(*out)
                 else:
                     self.send_error(404)
 
@@ -573,6 +587,12 @@ PAGE = """<!doctype html>
     .log li { grid-template-columns: 4.75rem minmax(0, 1fr); gap: 12px; padding: 9px 18px 9px 12px; }
     .notice { padding: 14px 16px; gap: 14px; }
   }
+  /* [care] styles */
+
+  /* [week] styles */
+
+  /* [moss] styles */
+
 </style></head>
 <body>
 <header class="wrap top">
@@ -603,6 +623,8 @@ PAGE = """<!doctype html>
         <p class="answer-text" id="answer">Ask where something is, by typing or out loud.</p>
       </div>
     </section>
+
+    <!-- [care] panel -->
 
     <section class="card guide" id="guide" hidden aria-label="Directions">
       <div class="dial">
@@ -647,6 +669,9 @@ PAGE = """<!doctype html>
       <div class="sec-head"><h2 id="logH">What moved</h2><p class="muted">Newest at the bottom</p></div>
       <div class="card"><ol class="log" id="log"><li class="empty">Nothing has moved yet.</li></ol></div>
     </section>
+
+    <!-- [week] panel -->
+
   </div>
 </main>
 <script>
@@ -858,6 +883,12 @@ PAGE = """<!doctype html>
       : camSeen ? "Trying again every second." : "The picture appears here once the laptop's camera sends its first frame.";
     setTimeout(camTick, 1000);
   };
+  // [care] script
+
+  // [week] script
+
+  // [moss] script
+
   tick(); guideTick(); camTick();
 </script>
 </body></html>

@@ -10,6 +10,8 @@ moss                       # Moss semantic search: which item a vague question m
 sounddevice                # recall.voice: the laptop mic
 faster-whisper             # recall.voice: speech to text on the laptop (Whisper, plus the Silero VAD it ships)
 bleak                      # Bluetooth LE to the band (recall/band.py)
+anthropic>=2.3           # recall/care.py: Claude for the care partner (only with ANTHROPIC_API_KEY)
+cartesia>=4.2            # recall/tts.py: Cartesia voice (only with CARTESIA_API_KEY)
 psycopg[binary]>=3.2       # recall/db.py: the database (optional at runtime: only with DATABASE_URL)
 # Task 4 (HTTP):
 fastapi
