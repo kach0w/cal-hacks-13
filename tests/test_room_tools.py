@@ -12,9 +12,11 @@ rendered by ray casting, LiDAR depth, camera JSONs in Polycam's format) and runs
 steps on it. Then registers a fake webcam and calibrates a fake lens.
 """
 
+import json
 import sys
 import tempfile
 import traceback
+import zipfile
 from pathlib import Path
 
 import cv2
@@ -25,11 +27,12 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 
 import calibrate_intrinsics as ci  # noqa: E402
+import register_camera  # noqa: E402
 import scan_to_room as s2r  # noqa: E402
 from printed import TAG_DICT  # noqa: E402
 from roomlib import (  # noqa: E402
     FLIP_YZ, Mesh, camera_center, floor_hit, pixel_rays, plane_rms, project, save_json, solve_pose,
-    transform, world_from_clicks,
+    transform,
 )
 
 ROOM = (4.0, 2.5, 3.0)  # x, y (height), z
@@ -189,11 +192,10 @@ def test_scan_to_room():
             off = np.linalg.norm(corners - transform(POSE_FRAME, TRUTH[i]), axis=1).max()
             assert n >= 3 and off < 0.005, (i, n, off)
 
-        # Clicks in the scan's frame: the corner 1 cm above the floor, which fit_floor must remove.
-        corner, a, b = transform(POSE_FRAME, [(0, 0.01, 0), (1.5, 0, 0), (0, 0, 1.6)])
-        up, corner = s2r.fit_floor(mesh, corner)
-        T = world_from_clicks(corner, a, b, up)
-        assert np.allclose(T, world_from_clicks(corner, b, a, up)), "wall click order changed the frame"
+        # No clicks: floor at y = 0, axes along the walls, origin at the floor's corner. For this box
+        # room that is exactly the room's own frame.
+        T = s2r.world_frame(mesh)
+        assert np.isclose(np.linalg.det(T[:3, :3]), 1), "not right-handed"
         for i, (corners, _, _) in found.items():
             off = np.linalg.norm(transform(T, corners) - TRUTH[i], axis=1).max()
             assert off < 0.005, (i, off)
@@ -201,9 +203,6 @@ def test_scan_to_room():
 
 def test_gltf_mesh_in_a_zip():
     """Newer exports name the mesh raw.gltf, and the export usually arrives zipped."""
-    import json
-    import zipfile
-
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         export, out = tmp / "export" / "Scan 2026-10-24", tmp / "room"
@@ -212,13 +211,12 @@ def test_gltf_mesh_in_a_zip():
         with zipfile.ZipFile(tmp / "scan.zip", "w") as z:
             for p in export.rglob("*"):
                 z.write(p, p.relative_to(tmp / "export"))
-        corner, a, b = transform(POSE_FRAME, [(0, 0, 0), (1.5, 0, 0), (0, 0, 1.6)])
-        save_json(out / "frame_picks.json", {"convention": "inverse alignment|c2w|arkit",
-                                             "corner": corner.tolist(), "along_a": a.tolist(), "along_b": b.tolist()})
-        sys.argv = ["scan_to_room.py", str(tmp / "scan.zip"), "--marker-size", str(S), "--out", str(out)]
+        sys.argv = ["scan_to_room.py", str(tmp / "scan.zip"), "--out", str(out)]
         s2r.main()
-        markers = json.loads((out / "markers.json").read_text())["markers"]
+        saved = json.loads((out / "markers.json").read_text())
+        markers = saved["markers"]
         assert sorted(markers) == ["0", "1", "2", "3"], sorted(markers)
+        assert abs(saved["marker_size_m"] - S) < 0.003, saved["marker_size_m"]  # measured from the scan
         assert np.linalg.norm(np.array(markers["2"]) - TRUTH[2], axis=1).max() < 0.005
         room = trimesh.load(out / "room.glb", force="mesh")
         assert abs(room.bounds[0][1]) < 0.005, room.bounds  # floor at y = 0
@@ -260,14 +258,28 @@ def test_coplanar_detection():
     assert plane_rms(np.concatenate(list(TRUTH.values()))) > 0.05  # floor + walls
 
 
-def test_world_frame_is_right_handed():
-    corner, up = np.array([1.0, 0.0, 2.0]), np.array([0.0, 1.0, 0.0])
-    for a, b in (((3.0, 0, 2.0), (1.0, 0, 4.0)), ((1.0, 0, 0.5), (2.5, 0, 2.0))):
-        T = world_from_clicks(corner, a, b, up)
-        assert np.isclose(np.linalg.det(T[:3, :3]), 1)
-        assert np.allclose(transform(T, [corner]), 0)
-        pa, pb = transform(T, [a, b])
-        assert min(pa[0], pa[2], pb[0], pb[2]) > -1e-9, "an axis points out of the room"
+def test_setup_flow():
+    """setup_room's path: export zip dropped in the room folder -> scan processed -> webcam registered."""
+    with tempfile.TemporaryDirectory() as tmp:
+        room, export = Path(tmp) / "room", Path(tmp) / "export"
+        room.mkdir()
+        export.mkdir()
+        make_export(export)
+        with zipfile.ZipFile(room / "Scan.zip", "w") as z:
+            for p in export.rglob("*"):
+                z.write(p, p.relative_to(export))
+        report = s2r.process_scan(s2r.prepare_scan(room), room)
+        assert sorted(report["markers"]) == ["0", "1", "2", "3"], report["markers"]
+        assert not (room / "Scan.zip").exists(), "the zip should move in with its scan"
+        assert s2r.prepare_scan(room) == room / "scan_raw", "a second run should reuse the unpacked scan"
+
+        K = np.array([[900.0, 0, 640], [0, 900.0, 360], [0, 0, 1]])
+        R, t = look_at((3.85, 2.35, 0.15), (1.0, 0.0, 2.0))
+        frame = cv2.cvtColor(render(Mesh(*room_mesh()), K, R, t, (1280, 720)), cv2.COLOR_GRAY2BGR)
+        lens = {"K": K.tolist(), "dist": [0.0] * 5, "width": 1280, "height": 720}
+        camera = register_camera.register([frame], lens, room)
+        off = np.linalg.norm(camera["center"] - camera_center(R, t))
+        assert off < 0.02 and camera["rms_px"] < 1, (off, camera["rms_px"])
 
 
 def test_calibrate_intrinsics():
@@ -294,7 +306,7 @@ def test_calibrate_intrinsics():
         frame = cv2.warpPerspective(art, H, (1280, 720), borderValue=90)
         if (found := ci.find_board(detector, frame)) is not None:
             views.append(found)
-    rms, K2, dist = ci.calibrate(board, views, (1280, 720))
+    rms, K2, dist, used = ci.calibrate(board, views, (1280, 720))
     assert rms < 0.5 and np.abs(K2 - K).max() < 5, (rms, K2)
 
 

@@ -1,9 +1,12 @@
-# local data; data/reference/ and Person A's data/room/ deliverables are committed
+# local data; data/reference/, the lens files in data/cameras/ and Person A's data/room/ deliverables are committed
 data/*
 !data/reference/
+!data/cameras/
 !data/room/
-data/room/scan_raw/
-data/room/calib_frames/
+# the scan export (it holds the home's GPS position), calibration photos and derived caches
+data/room/scan_raw*/
+data/room/calib_frames*/
+data/room/*_session1*
 data/room/*.tmp
 data/room/xyz_map.npy
 data/room/xyz_map.sha1

@@ -253,7 +253,7 @@ thing that's flawless, when reliability *is* the demo.
 | 2 | Camera loops, YOLO-World given the names of 5 objects + the bag | No product without it |
 | 3 | Wrist marker → on-screen proximity meter, **pixel space, one camera** | Rung 2, and the fallback if setup fails. No calibration, so it starts on minute one |
 | 4 | Marker colour verified under demo lighting | The one part lighting can break. Two minutes early, fatal late |
-| 5 | Setup (`tools/`): markers up, Polycam raw scan → `scan_to_room.py`, lens calibration, `register_camera.py`, `check_room.py` | Puts the scan and the camera in one set of coordinates: the handoff to B |
+| 5 | Setup: markers up, Polycam scan zips into `data/room/`, `uv run tools/setup_room.py --camera brio` | Puts the scan and the camera in one set of coordinates: the handoff to B |
 | 6 | `pixel_to_world` from the scan for every object (B, CAMERA.md Part E) | Real positions, couches included |
 | 7 | Surfaces named in the map → "on the counter" | The human-readable half of every answer |
 | 8 | Containment guess on disappearance, observed/inferred + confidence | **The wow moment**, and the most fragile code in the project |
@@ -453,8 +453,6 @@ truth is better than their assumption.
 - [ ] **Confirm the camera sees at least 3 markers face-on** from its demo position, on the
       floor and a wall it faces.
 - [ ] **Scan with the surfaces cleared**, and keep the bag out of the scan — it's an object.
-- [ ] **Tape-measure the setup.** Two points on the table, map distance vs. real. Off by more
-      than a few cm → check the ARKit/OpenCV axis flip before anything else.
 - [ ] **Decide where the mic lives** — on the band, or the laptop gated by the band's button.
 - [ ] **Test marker tracking under demo lighting.** Colour thresholding is the one part
       lighting can break; the fix is a different marker colour and takes two minutes.

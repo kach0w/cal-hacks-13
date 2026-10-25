@@ -25,6 +25,10 @@ REAL = ROOT / "data" / "room"
 SOFA = Surface("sofa", [3.9, 0.3, 0.7], [4.6, 1.0, 2.3])
 TABLE = Surface("coffee table", [1.8, 0.2, 0.9], [2.8, 0.9, 1.5])
 SINK = Surface("sink", [0.0, 0.8, 3.0], [0.6, 1.2, 3.6], "in")
+# The sofa and table where they really are in data/room's scan (setup_room.py's frame), for the
+# tests that draw on the real plan or through test_room's camera.
+SCAN_SOFA = Surface("sofa", [1.77, 0.3, 3.99], [3.37, 1.0, 4.69])
+SCAN_TABLE = Surface("coffee table", [2.57, 0.2, 1.89], [3.17, 0.9, 2.89])
 
 
 @pytest.fixture(scope="module")
@@ -40,7 +44,7 @@ def test_plan_mapping_matches_scan_to_room(scan):
     """Every marker corner lands on the magenta outline scan_to_room drew around it."""
     v, plan, _ = scan
     lo = sf.plan_origin(v, plan.shape)
-    assert sf.to_plan(lo, 0, 0) == (105, 131)                       # the yellow origin dot
+    assert sf.to_plan(lo, 0, 0) == (32, 96)                         # the yellow origin dot
     for c in json.loads((REAL / "markers.json").read_text())["markers"].values():
         for x, _, z in c:
             u, v_ = sf.to_plan(lo, x, z)
@@ -55,8 +59,8 @@ def test_plan_from_another_scan_is_refused(scan):
 
 def test_heights_under_the_plan(scan):
     _, _, scene = scan
-    assert abs(sf.top_height(scene, 3.14, 3.64, 1.48, 1.98)) < 0.03         # floor by marker 4
-    assert 0.35 < sf.top_height(scene, 3.94, 4.54, 0.68, 2.28) < 0.55        # the sofa's seat
+    assert abs(sf.top_height(scene, 2.09, 2.59, 3.23, 3.73)) < 0.03         # floor by marker 4
+    assert 0.35 < sf.top_height(scene, 1.79, 3.39, 4.03, 4.63) < 0.55        # the sofa's seat
     assert sf.top_height(scene, 20, 21, 20, 21) is None                       # outside the scan
 
 
@@ -66,7 +70,7 @@ def test_a_loose_box_keeps_the_table_top(scan):
     v, plan, scene = scan
     lo = sf.plan_origin(v, plan.shape)
     tops = []
-    for x, y, w, h in ([270, 220, 128, 72], [264, 214, 140, 84], [258, 208, 152, 96], [250, 200, 170, 110]):
+    for x, y, w, h in ([279, 270, 72, 128], [273, 264, 84, 140], [267, 258, 96, 152], [261, 250, 110, 170]):
         (x0, z0), (x1, z1) = lo + np.array([x, y]) / sf.PLAN_PPM, lo + np.array([x + w, y + h]) / sf.PLAN_PPM
         tops.append(sf.top_height(scene, x0, x1, z0, z1))
     assert all(0.3 < t < 0.4 for t in tops) and max(tops) - min(tops) < 0.02, tops
@@ -121,7 +125,7 @@ def data(tmp_path):
 
 def test_naming_on_the_plan(data, monkeypatch):
     """Drag two boxes on plan.png, name them: world boxes with heights from the scan."""
-    rois = np.array([[500, 200, 60, 160], [420, 280, 50, 50], [10, 10, 3, 3]])   # sofa, floor, a slip
+    rois = np.array([[211, 500, 160, 60], [241, 420, 50, 50], [10, 10, 3, 3]])   # sofa, floor, a slip
     answers = iter(["sofa", "on", "floor by the window", "on"])
     monkeypatch.setattr(cv2, "selectROIs", lambda *a, **k: rois)
     monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
@@ -133,7 +137,7 @@ def test_naming_on_the_plan(data, monkeypatch):
     assert list(got) == ["sofa", "floor by the window"]
     sofa = got["sofa"]
     assert np.allclose([sofa.box_min[0], sofa.box_min[2], sofa.box_max[0], sofa.box_max[2]],
-                       [3.944, 0.684, 4.544, 2.284], atol=0.002)
+                       [1.788, 4.033, 3.388, 4.633], atol=0.002)
     assert 0.35 < sofa.top < 0.55 and sofa.box_max[1] - sofa.box_min[1] == pytest.approx(0.7)
     assert sofa.box_min[1] == pytest.approx(sofa.top - sf.BELOW_M)
     assert abs(got["floor by the window"].top) < 0.03
@@ -144,7 +148,7 @@ def test_show_draws_on_the_plan_and_the_camera(data, monkeypatch):
     from test_room import camera_json
     monkeypatch.setattr("recall.overlay.preview", lambda path: None)
     cfg = Settings(data_dir=data)
-    sf.save_surfaces([SOFA, TABLE], cfg.surfaces_path)
+    sf.save_surfaces([SCAN_SOFA, SCAN_TABLE], cfg.surfaces_path)
     sf.show(cfg)
     assert (data / "room" / "surfaces.png").exists() and not (data / "room" / "surfaces_camera.jpg").exists()
     (data / "room" / "camera.json").write_text(json.dumps(camera_json()))
@@ -160,7 +164,7 @@ def test_names_sit_inside_their_outlines():
     from test_room import camera_json
     room = Room(camera_json())
     checked = 0
-    for s in (SOFA, TABLE, Surface("floor", [1.0, -0.1, 0.5], [3.5, 0.6, 3.0], top=0.0)):
+    for s in (SCAN_SOFA, SCAN_TABLE, Surface("floor", [1.07, -0.1, 1.09], [3.57, 0.6, 3.59], top=0.0)):
         runs, anchor = surface_outline(s, room, (1280, 720))
         if anchor is not None:
             outline = np.concatenate(runs).astype(np.float32)
@@ -170,11 +174,12 @@ def test_names_sit_inside_their_outlines():
 
 
 def test_outlines_only_where_the_lens_model_holds():
-    """data/room/intrinsics.json's dist folds back ~51 degrees off-axis: projected through it, a rug
-    beside and below the camera (out of view) lands inside the image. It must not be drawn."""
+    """A real lens fit (the Brio's first calibration) whose dist folds back ~51 degrees off-axis:
+    projected through it, a rug beside and below the camera (out of view) lands inside the image.
+    It must not be drawn."""
     from test_room import look_at
     R, t = look_at((0.15, 2.3, 0.15), (3.2, 0.3, 2.6))
-    dist = json.loads((REAL / "intrinsics.json").read_text())["dist"]
+    dist = [-0.154541, 0.288113, -0.09068, 0.000996, -0.149625]
     room = Room({"width": 1280, "height": 720, "K": [[1000, 0, 640], [0, 1000, 360], [0, 0, 1]], "dist": dist,
                  "R": R.tolist(), "t": t.tolist()})
     rug = Surface("rug by the door", [-0.05, -0.1, 1.1], [0.75, 0.6, 1.9], top=0.0)

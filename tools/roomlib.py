@@ -1,7 +1,7 @@
 """Shared geometry for the room tools (handoffAB.md).
 
 Conventions, everywhere in data/room/:
-    world   metres, Y up, floor at y = 0, origin at the taped corner
+    world   metres, Y up, floor at y = 0, X and Z along the walls, room at x, z >= 0
     camera  OpenCV: x right, y down, z forward
     pose    X_cam = R @ X_world + t   (what cv2.solvePnP returns)
 """
@@ -16,6 +16,7 @@ from printed import TAG_DICT, TAG_IDS
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data" / "room"
+CAMERAS = ROOT / "data" / "cameras"  # one lens calibration per webcam, reused in every room
 
 # Camera axes, ARKit/OpenGL (x right, y up, looking down -z) <-> OpenCV. It is its own inverse.
 FLIP_YZ = np.diag([1.0, -1.0, -1.0])
@@ -107,29 +108,6 @@ def plane_rms(pts):
     return float(np.linalg.svd(pts - pts.mean(axis=0), compute_uv=False)[-1] / np.sqrt(len(pts)))
 
 
-def world_from_clicks(corner, along_a, along_b, up):
-    """4x4 transform into the world frame: origin at `corner`, Y = `up`, X and Z along the walls.
-
-    `along_a` / `along_b` are points along each wall. Which wall becomes X is chosen so the
-    frame is right-handed (X x Y = Z) and both X and Z point into the room.
-    """
-    corner = np.asarray(corner, np.float64)
-    y = np.asarray(up, np.float64) / np.linalg.norm(up)
-
-    def along_floor(p):
-        v = np.asarray(p, np.float64) - corner
-        v -= (v @ y) * y
-        return v / np.linalg.norm(v)
-
-    a, b = along_floor(along_a), along_floor(along_b)
-    x = a if np.cross(a, y) @ b > 0 else b
-    z = np.cross(x, y)
-    T = np.eye(4)
-    T[:3, :3] = np.vstack([x, y, z])
-    T[:3, 3] = -T[:3, :3] @ corner
-    return T
-
-
 def transform(T, pts):
     pts = np.asarray(pts, np.float64)
     return pts @ T[:3, :3].T + T[:3, 3]
@@ -178,11 +156,6 @@ class Mesh:
         dist = np.linalg.norm(d, axis=1)
         return self.cast(np.broadcast_to(eye, d.shape), d / dist[:, None]) > dist - tol
 
-    def vertex_normals(self):
-        import trimesh
-
-        return trimesh.Trimesh(self.vertices, self.faces, process=False).vertex_normals
-
 
 def bring_to_front():
     """macOS opens a script's windows behind the terminal; raise them. No-op elsewhere."""
@@ -193,28 +166,3 @@ def bring_to_front():
     except ImportError:
         pass
 
-
-def pick_points(mesh, n, prompt):
-    """Shift+click n points on the mesh in an Open3D window; returns them in order."""
-    import open3d as o3d
-    import trimesh
-
-    # A dense sample of the surface, drawn big, so a click always lands on a point.
-    tm = trimesh.Trimesh(mesh.vertices, mesh.faces, process=False)
-    points, faces = trimesh.sample.sample_surface_even(tm, 400_000, seed=0)
-    pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
-    pcd.colors = o3d.utility.Vector3dVector(0.25 + 0.75 * np.abs(tm.face_normals[faces]))  # floor and walls tinted apart
-    print(f"\n{prompt}\n  shift+click a dot to pick, shift+right-click to undo, +/- to resize dots, "
-          "close the window when done")
-    while True:
-        vis = o3d.visualization.VisualizerWithEditing()
-        vis.create_window(window_name=prompt[:80], width=1400, height=900)
-        vis.add_geometry(pcd)
-        vis.get_render_option().point_size = 4
-        bring_to_front()
-        vis.run()
-        vis.destroy_window()
-        picked = vis.get_picked_points()
-        if len(picked) == n:
-            return points[picked]
-        print(f"  picked {len(picked)} points, need exactly {n}; try again")

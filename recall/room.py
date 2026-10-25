@@ -123,7 +123,7 @@ def mesh_frame_problems(vertices, triangles):
     """Reasons the mesh may not be in the world frame (Y-up, floor at y = 0); empty if it looks right.
 
     A box room looks the same along every axis, so the axis test only flags a largest horizontal
-    plane far smaller than a wall; tools/check_room.py checks the room against tape measurements.
+    plane far smaller than a wall; tools/scan_to_room.py checks the scan against its own LiDAR depth.
     """
     found = [planes(vertices, triangles, a) for a in range(3)]
     biggest = [area.max(initial=0.0) for _, area in found]

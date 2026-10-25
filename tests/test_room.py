@@ -29,7 +29,7 @@ def look_at(eye, target):
     return R, -R @ np.asarray(eye, float)
 
 
-EYE, TARGET = (4.9, 2.4, 3.8), (1.5, 0.3, 1.0)   # high in the far corner, looking across the room
+EYE, TARGET = (0.27, 2.4, 4.99), (3.07, 0.3, 1.59)   # high in the far corner, looking across the room
 R, T = look_at(EYE, TARGET)
 
 

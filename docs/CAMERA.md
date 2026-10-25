@@ -22,7 +22,7 @@ DESIGN §8 sketches more loosely.
 | B | Places — surfaces of the scan (`recall/surfaces.py`, named on its plan) once the room is registered; image zones (`recall/zones.py`) before that | **Built** (`recall/places.py`) |
 | C | Live loop — capture thread, detection thread (gate → detect → memory), frozen-camera guard | **Built** (`recall/live.py`, `pipeline.py`, `camera.py`, `gate.py`, `perception.py`) |
 | D | Memory + queries — state, append-only log, photos, where/changes/diff, "as of" stamping | **Built** (`recall/memory.py`, `store.py`, `query.py`, `ask.py`) |
-| E | Scan → map + markers, lens, registration, checks (Person A's `tools/`); the runtime bridge `pixel_to_world` (`recall/room.py`) | **Scan delivered** (`data/room/`: room.glb, markers.json, plan.png). **Lens needs redoing** (§7, E2), then `register_camera.py` → camera.json |
+| E | Scan → map + markers, lens, registration (Person A's `tools/setup_room.py`); the runtime bridge `pixel_to_world` (`recall/room.py`) | **Delivered** (`data/room/`: room.glb, markers.json, plan.png, camera.json; lens in `data/cameras/`) |
 | F | HTTP surface (DESIGN §7) | **To build** (task 4) |
 
 Tests (fake sightings, fake detector, the real scan with a known pose — no camera):
@@ -81,18 +81,20 @@ data/replay/          state/events/photos of the last --src video replay (wiped 
 data/range_test/      task 0 bursts per station + report/ sheets
 data/enroll/<id>/     crops from calibration (from the corner camera)
 data/reference/<id>.png  background-removed photos of each prop (committed) — re-id references
-data/room/            (E) committed; formats in handoffAB.md. From Person A's tools: room.glb,
-                      markers.json, plan.png, scan_report.json, frame_picks.json (scan_to_room),
-                      intrinsics.json (calibrate_intrinsics), camera.json + camera_ref.jpg +
-                      camera_overlay.jpg (register_camera), checks.json + check_pixels.json
-                      (check_room). From recall: surfaces.json. Git-ignored: xyz_map.npy (H×W×3
+data/cameras/         (E) one lens file per webcam (calibrate_intrinsics), reused in every room
+data/room/            (E) committed; formats in handoffAB.md. From Person A's setup_room.py:
+                      room.glb, markers.json, plan.png, scan_report.json (scan_to_room),
+                      camera.json + camera_ref.jpg + camera_overlay.jpg (register_camera).
+                      From recall: surfaces.json. Git-ignored: scan_raw*/ (the export, with the
+                      home's GPS position), xyz_map.npy (H×W×3
                       world point per pixel, NaN = no hit; a cache) and the surfaces previews
                       (surfaces_drawn.jpg, surfaces.png, surfaces_camera.jpg)
 *.pt, mobileclip*.ts  model weights in the repo root (git-ignored; downloaded once)
 ```
 
-**World frame (Part E):** meters, **Y-up**, **floor at y = 0**, origin at a taped room
-corner, axes along the walls. Every 3D number in the system is in this frame.
+**World frame (Part E):** meters, **Y-up**, **floor at y = 0**, axes along the walls, origin at the
+corner of the scanned floor's outline (found from the scan; `plan.png` shows it). Every 3D number in
+the system is in this frame.
 
 **Data shapes** — DESIGN §7's seams, as dataclasses in `recall/models.py`; `to_dict()` is exactly
 the JSON on disk. Fields beyond DESIGN §7 are kept for the rules and replay (name, status, …).
@@ -339,59 +341,54 @@ the shared geometry and conventions live in `tools/roomlib.py`, and what's print
 `tools/printed.py` (markers: ArUco `DICT_4X4_50` ids 0–5, 18 cm nominal; lens board: ChArUco
 `DICT_5X5_100`, 7×5 squares of 3.5 cm).
 
-**State of `data/room/` (delivered on the 3ddesign branch):**
-- `room.glb` (56k triangles, Y up, floor at y = 0), `markers.json` (markers 0, 3, 4, 5 on the floor
-  and two walls, 16.8 cm measured; every corner within 1 mm of the mesh, which holds by
-  construction: corners are cast onto it), `plan.png`, `scan_report.json` — **good**: the frame
-  checks pass and `recall/room.py` lands on the markers within 1 cm with a known pose
-  (`tests/test_room.py`). **But** `scan_report.json` warns that the corners of markers 0, 3 and 4
-  spread 20, 24 and 36 mm across sightings (warning above 10 mm; marker 4 rests on 10 sightings,
-  marker 3 on 7), so they may sit ~1 cm off along the surface. Edge lengths are within 0.6% of the
-  print (marker 5: 1.1% short). E3's `rms_px` and E4 will show whether a rescan with more, closer
-  sightings of those markers is needed.
-- `intrinsics.json` — **redo it before registering.** `cy = −249 px` (the principal point is
-  above the 720 px image; it should be near 360) and `fy/fx = 1.18` (webcams are ≈ 1.0); the
-  0.68 px rms only means the fit matched the views it saw. Re-run E2 with the board in every
-  part of the frame, corners included, and tilted.
-- `checks.json` — `lens_measured` z = 5.52 m is 1.4 m past the scanned area (z ≤ 4.10 m): fine only
-  if the camera really is behind the scanned part; `test_points` is empty, so the floor checks
-  can't run yet.
-- No `camera.json` yet (E3).
+**One command** (DESIGN §1): markers up, the Polycam export zip(s) dropped into `data/room/`, then
+`uv run tools/setup_room.py --camera <name>`. It runs E1–E3 below and prints its checks (E4). The
+three tools still run on their own: re-run `register_camera.py` alone after the camera is bumped.
 
-### E1. Scan → map + markers — `uv run tools/scan_to_room.py data/room/scan_raw --marker-size 0.168`
-Markers up first (≥ 3, floor **and** a wall the camera faces; **they stay up**). Polycam LiDAR mode,
-Developer mode on, Export → Raw data. The tool checks the export against its own LiDAR depth,
-finds the markers in the keyframes, asks for three clicks (the taped corner, a floor point along
-each wall), and writes `room.glb`, `markers.json`, `plan.png` (top-down, 100 px/m, origin and
-axes drawn) and `scan_report.json`.
+**State of `data/room/` (3ddesign):**
+- `room.glb` (56k triangles), `markers.json` (markers 0, 3, 4, 5 on the floor and two walls,
+  16.8 cm read from the scan), `plan.png`, `scan_report.json`. World frame found from the scan
+  (no clicks): floor at y = 0 (floor markers 3 and 4 sit within 1.3 cm of it), X and Z along the
+  walls, origin at the corner of the floor's outline. `scan_report.json` still notes that markers
+  0, 3 and 4's corners spread 20, 24 and 36 mm across sightings (Polycam's drift between passes).
+- Lens: `data/cameras/brio-101.json` — fx 1348, fy 1354, centre (619, 311), 0.85 px over 49
+  views (the first calibration's `cy = −249` is gone). Reused in every room.
+- `camera.json` + `camera_ref.jpg` + `camera_overlay.jpg`: registered from markers 0, 4, 5
+  (marker 3 is under the glass table) at 1.26 px; the webcam is at (−2.52, 2.58, 4.44), past the
+  scanned floor. With 3 markers in view, floor positions are good to roughly 5–8 cm; another
+  marker or two in its view (then a rescan) tightens it.
 
-### E2. Lens — `uv run tools/calibrate_intrinsics.py --camera <name>`
-`printables/calibration_board.pdf` (ChArUco), mounted flat, ~20 views at 1280×720: near, far,
-tilted, and in every part of the frame. Frames are kept automatically; c calibrates →
-`intrinsics.json`. Redo whenever resolution, focus or zoom change.
+### E1. Scan → map + markers (`tools/scan_to_room.py`)
+The export zip(s) in `data/room/` are unpacked into `scan_raw/` (git-ignored: it holds the home's
+GPS position). The tool checks the export against its own LiDAR depth, finds the markers in the
+keyframes and casts their corners onto the mesh, sets the world frame from the scan alone, and
+writes `room.glb`, `markers.json`, `plan.png` (top-down, 100 px/m, origin and axes drawn) and
+`scan_report.json`.
 
-### E3. Pose — `uv run tools/register_camera.py --camera <name>`
+**Fallback when it stops at the depth check** (`FAIL: no reading lines the mesh up with LiDAR
+depth`): the markers can't be found in the keyframes, so their corners would have to be clicked on
+the mesh by hand, in OpenCV's order (top-left, top-right, bottom-right, bottom-left, looking at the
+marker upright), into handoffAB.md §2's format. No tool does this; it hasn't been needed.
+
+### E2. Lens (`tools/calibrate_intrinsics.py`)
+Once per webcam, into `data/cameras/<webcam>.json`. `setup_room.py` runs it the first time it
+meets a webcam: hold `printables/calibration_board.pdf` (ChArUco) 40–60 cm away until the
+on-screen 3×3 grid has filled and a few shots are tilted; it finishes by itself. Redo
+(`--recalibrate`) if resolution, focus or zoom change.
+
+### E3. Pose (`tools/register_camera.py`)
 Watches the markers ~2 s, matches their corners to `markers.json`, `solvePnPRansac` +
 `solvePnPRefineLM` → `camera.json` (`{width, height, K, dist, R, t, camera_center, rms_px,
-markers_used, registered_at}`), `camera_ref.jpg` and `camera_overlay.jpg` (detected corners, the
-markers and the mesh drawn where the pose puts them: they must sit on the real ones).
-**Camera bumped:** re-run E3 — the markers are still up, no clicking.
+markers_used, registered_at}`), `camera_ref.jpg` and `camera_overlay.jpg` (the markers and the mesh
+drawn where the pose puts them: they must sit on the real ones). **Camera bumped:** re-run it —
+the markers are still up.
 
-**Fallback when E1 stops at step 2** (`FAIL: no reading lines the mesh up with LiDAR depth`, and
-DESIGN §1.1 / §11 send you here): the markers can't be found in the keyframes, so their corners
-are clicked on the mesh by hand. **No tool does this yet** (Person A); the pieces are in
-`tools/roomlib.py`. Set the world frame from three clicks as E1 step 4 does (`pick_points` → a room
-corner on the floor and a point on each wall → `world_from_clicks`) and write `room.glb` in it; then
-for each marker shift-click its 4 corners (`pick_points(mesh, 4, ...)`) in OpenCV's order —
-top-left, top-right, bottom-right, bottom-left, looking at the marker upright — move them into the
-world frame (`transform`) and write `markers.json` in handoffAB.md §2's format. Then E3 as usual.
+### E4. Checks (automatic)
+No tape measurements. `setup_room.py` reports: the mesh against the phone's LiDAR depth (< 2 cm),
+floor markers at y = 0, the camera's fit to the markers, and how many markers it sees. The
+overlay is the eyeball check.
 
-### E4. Check — `uv run tools/check_room.py [--wall-to-wall 4.12]`
-The handoff acceptance table: rms < 5 px, camera centre within 5 cm of the tape, `floor_hit` on the
-`checks.json` test objects within 5 cm (mid) / 10 cm (far corner), scale within 2%. You click each
-test object's base in `camera_ref.jpg` once (kept in `check_pixels.json`).
-
-| If it fails | Likely cause |
+| If positions look off | Likely cause |
 |---|---|
 | Same offset everywhere | mesh origin / axes |
 | Error grows with distance | scale, or the focal length in K |
@@ -439,7 +436,7 @@ Nothing starts before the task above it passes its check.
 | 2 | **Record a demo video** (`python -m tools.record data/demo1.mp4`, script below; refuses to overwrite without `--force`) and replay with `--src` | Event log matches what happened, no phantom moves from a hand passing over |
 | 3 | **Tune** `LOOP_S`, `MISSING_AFTER_K`, `MOVE_CONFIRM_N`, `CHANGE_FRACTION`, `CONTAIN_OVERLAP`, per-item `min_score`, prompts on those videos (`python -m tools.tune`, below) | Glasses→bag inferred every run; hand-over-object produces no `disappeared` |
 | 4 | **HTTP surface** (`recall/api.py`, FastAPI, **one uvicorn worker**), DESIGN §7: `GET /state`, `GET /changes?since=today`, `POST /ask {text}`, `GET /stream/{cam}` (MJPEG) — thin wrappers over `query.py`. (`GET /proximity` belongs to the wrist tracker, DESIGN §4.2. Open: DESIGN lists no route for the photos behind `photo_path`.) | care-partner page and voice layer can call it |
-| 5 | **Part E** (Person A): E2 again (the lens), E3, E4; then E5 surfaces (reset the memory first, §4) | `check_room.py` passes; `state.json` shows `xyz` and surface names |
+| 5 | **Part E** (Person A): `setup_room.py` (E1–E4, done); then E5 surfaces (reset the memory first, §4) | the overlay sits on the room; `state.json` shows `xyz` and surface names |
 | 6 | **Only if identity swaps:** re-id — embed `data/enroll/` crops (camera view, preferred) and `data/reference/` cutouts (phone photos, starting point) with CLIP via `open_clip`, accept a detection only if cosine ≥ 0.80 to its item, hold 0.60–0.80 | no swaps on the demo video |
 | 7 | **Only if time:** E7 viewer | pins on the mesh at the right spots |
 
@@ -544,7 +541,7 @@ case-insensitive) or an environment variable `RECALL_NAME=VALUE`; precedence def
   "Install Certificates.command" in `/Applications/Python 3.11/`).
 - **Python 3.11 venv** (`python3.11 -m venv .venv`): open3d (Part E) has no wheels for 3.13+/3.14.
 - **Two environments:** `recall` and `python -m tools.*` run in `.venv`; Person A's setup tools
-  (`scan_to_room`, `calibrate_intrinsics`, `register_camera`, `check_room`) are `uv run` scripts that
+  (`setup_room`, `scan_to_room`, `calibrate_intrinsics`, `register_camera`) are `uv run` scripts that
   build their own (Python ≤ 3.12, open3d 0.19, trimesh). Their test also runs under the venv's pytest.
 - **One OpenCV wheel only** — `opencv-python` (ArUco is in core since 4.7). Having
   `opencv-contrib-python` installed too makes them overwrite each other's `cv2`.
@@ -591,10 +588,10 @@ recall/                      DESIGN §6 component in brackets
   room.py        (E) data/room/ → pixel_to_world / floor_hit / world_to_pixel   [Localizer]
   api.py         (task 4) FastAPI — to build
 tools/           Part E setup (Person A; `uv run tools/<name>.py`):
-  scan_to_room.py         (E1) Polycam raw export -> room.glb, markers.json, plan.png
-  calibrate_intrinsics.py (E2) ChArUco board -> intrinsics.json
+  setup_room.py           (E1-E4) the one command: scan, lens, pose, checks
+  scan_to_room.py         (E1) Polycam export zip(s) -> room.glb, markers.json, plan.png
+  calibrate_intrinsics.py (E2) ChArUco board -> data/cameras/<webcam>.json
   register_camera.py      (E3) markers -> camera.json, camera_ref.jpg, camera_overlay.jpg
-  check_room.py           (E4) the handoff acceptance table
   roomlib.py, printed.py, webcam.py   shared geometry, what's printed, opening a camera by name
                  Session tools (`python -m tools.<name>`):
   cameras.py              which index is the corner camera (one frame from each)
