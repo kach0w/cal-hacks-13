@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Recall Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rye&family=Libre+Franklin:wght@400;600;800&family=Courier+Prime:wght@400;700&display=swap">
+<style>
+/* Layout: a Clue-style game board. Green baize table, each room a tile on the board,
+   each listed item a pawn standing in the room it was last seen in. Case notes below. */
+:root {
+  --baize: #1d4a35;
+  --baize-deep: #143526;
+  --tile: #efe4c8;
+  --tile-edge: #b89a5a;
+  --ink: #2b2118;
+  --muted: #7a6a52;
+  --brass: #d8a93b;
+  --font-display: "Rye", Georgia, serif;
+  --font-body: "Libre Franklin", -apple-system, system-ui, sans-serif;
+  --font-note: "Courier Prime", ui-monospace, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  min-height: 100vh; background: radial-gradient(ellipse at top, var(--baize), var(--baize-deep));
+  color: var(--tile); font: 15px/1.45 var(--font-body);
+  padding: max(20px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+           max(28px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+}
+main { max-width: 1100px; margin: 0 auto; display: grid; gap: 22px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+h1 { font: 400 clamp(2rem, 6vw, 3.2rem)/1 var(--font-display); margin: 0; color: var(--brass);
+     letter-spacing: 0.04em; text-shadow: 0 2px 0 var(--baize-deep); }
+.clock { font: 700 1rem var(--font-note); color: var(--tile); opacity: 0.85; }
+
+.board { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px;
+  padding: 14px; border: 3px solid var(--tile-edge); border-radius: 6px; background: rgba(0,0,0,0.15); }
+.room { position: relative; min-height: 220px; background: var(--tile); color: var(--ink);
+  border: 2px solid var(--tile-edge); border-radius: 4px; overflow: hidden; display: grid;
+  grid-template-rows: auto 1fr; }
+.room .cam { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  opacity: 0.22; filter: grayscale(1) sepia(0.4); }
+.room h2 { position: relative; margin: 0; padding: 10px 12px 4px; font: 400 1.5rem var(--font-display);
+  letter-spacing: 0.05em; text-transform: uppercase; }
+.room .live { position: absolute; top: 12px; right: 12px; font: 700 0.7rem var(--font-note);
+  letter-spacing: 0.08em; color: var(--muted); }
+.room .live.on::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 5px;
+  border-radius: 50%; background: #c0392b; vertical-align: 1px; }
+.pawns { position: relative; display: flex; flex-wrap: wrap; align-content: flex-end; gap: 14px; padding: 12px; }
+.room.empty .pawns::after { content: "nothing on the list here"; font: 0.85rem var(--font-note); color: var(--muted); }
+
+.pawn { display: grid; justify-items: center; gap: 4px; width: 78px; text-align: center;
+  transition: transform 300ms ease; }
+.pawn .piece { width: 46px; height: 58px; position: relative; }
+.pawn .piece::before { content: ""; position: absolute; left: 13px; top: 0; width: 20px; height: 20px;
+  border-radius: 50%; background: var(--c); box-shadow: inset -3px -3px 0 rgba(0,0,0,0.25); }
+.pawn .piece::after { content: ""; position: absolute; left: 4px; bottom: 0; width: 38px; height: 40px;
+  border-radius: 19px 19px 6px 6px; background: var(--c); box-shadow: inset -5px -4px 0 rgba(0,0,0,0.25); }
+.pawn b { font: 800 0.9rem var(--font-body); }
+.pawn small { font: 0.75rem var(--font-note); color: var(--muted); }
+.pawn.stale .piece { opacity: 0.45; }
+.pawn.seek .piece { animation: seek 1s ease-in-out infinite; }
+@keyframes seek { 50% { transform: translateY(-6px); } }
+@media (prefers-reduced-motion: reduce) { .pawn.seek .piece { animation: none; outline: 3px solid var(--brass); } }
+
+.lower { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 14px; }
+.panel { background: rgba(0,0,0,0.2); border: 1px solid rgba(239,228,200,0.25); border-radius: 6px; padding: 14px 16px; min-width: 0; }
+.panel h3 { margin: 0 0 10px; font: 400 1.1rem var(--font-display); color: var(--brass); letter-spacing: 0.05em; }
+.missing { display: flex; flex-wrap: wrap; gap: 10px; }
+.missing .pawn small { color: rgba(239,228,200,0.7); }
+.missing .pawn b { color: var(--tile); }
+/* Chat log: oldest at the top, newest at the bottom, scrolls like a message thread. */
+.notes { list-style: none; margin: 0; padding: 4px 2px; display: flex; flex-direction: column; gap: 8px;
+  max-height: 340px; overflow-y: auto; scroll-behavior: smooth; font: 0.95rem var(--font-note); }
+.notes li { align-self: flex-start; max-width: 92%; background: var(--tile); color: var(--ink);
+  border-radius: 12px 12px 12px 3px; padding: 7px 11px; display: grid; gap: 2px;
+  border-left: 5px solid var(--c, var(--tile-edge)); }
+.notes li:last-child { box-shadow: 0 0 0 2px var(--brass); }
+.notes time { color: var(--muted); font-size: 0.78rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.notes .none { color: rgba(239,228,200,0.6); background: none; border: 0; padding: 0; }
+@media (max-width: 680px) { .lower { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Recall</h1>
+    <span class="clock" id="clock"></span>
+  </header>
+  <section class="board" id="board" aria-label="Rooms"></section>
+  <div class="lower">
+    <section class="panel">
+      <h3>Not seen yet</h3>
+      <div class="missing" id="missing"></div>
+    </section>
+    <section class="panel">
+      <h3>Case notes <small style="font: 0.75rem var(--font-note); color: rgba(239,228,200,0.6)">newest at the bottom</small></h3>
+      <ul class="notes" id="notes"><li class="none">Nothing has moved yet.</li></ul>
+    </section>
+  </div>
+</main>
+<script>
+  const COLORS = ["#c0392b", "#d8a93b", "#2e6fbf", "#7b3fa0", "#2f8a4f", "#e07b2a", "#555", "#b03a6f"];
+  const color = {};
+  const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+  const fmtTime = t => new Date(t * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  function ago(a) {
+    if (a < 3) return "seen now";
+    if (a < 60) return `${Math.round(a)}s ago`;
+    if (a < 3600) return `${Math.round(a / 60)} min ago`;
+    return "at " + fmtTime(Date.now() / 1000 - a);
+  }
+  function pawn(it, seek) {
+    const el = document.createElement("div");
+    el.className = "pawn" + (it.age !== null && it.age > 10 ? " stale" : "") + (seek ? " seek" : "");
+    el.style.setProperty("--c", color[it.name]);
+    el.innerHTML = `<div class="piece"></div><b>${cap(it.name)}</b><small>${it.age === null ? "not seen" : ago(it.age)}</small>`;
+    return el;
+  }
+  async function tick() {
+    try {
+      const s = await (await fetch("/items", { cache: "no-store" })).json();
+      s.items.forEach((it, i) => color[it.name] ??= COLORS[i % COLORS.length]);
+      document.getElementById("clock").textContent = fmtTime(s.now);
+
+      const board = document.getElementById("board");
+      board.replaceChildren(...s.rooms.map(room => {
+        const tile = document.createElement("article");
+        const here = s.items.filter(it => it.room === room);
+        tile.className = "room" + (here.length ? "" : " empty");
+        tile.innerHTML = `<img class="cam" alt="" src="/snap/${encodeURIComponent(room)}.jpg?t=${Date.now()}">
+          <h2>${room}</h2><span class="live on">LIVE</span><div class="pawns"></div>`;
+        tile.querySelector(".cam").onerror = e => e.target.remove();
+        tile.querySelector(".pawns").replaceChildren(...here.map(it => pawn(it, it.name === s.seeking)));
+        return tile;
+      }));
+
+      const missing = s.items.filter(it => it.room === null);
+      document.getElementById("missing").replaceChildren(
+        ...(missing.length ? missing.map(it => pawn(it, it.name === s.seeking))
+                           : [Object.assign(document.createElement("span"), { className: "none", textContent: "Everything on the list has been spotted." })]));
+
+      const notes = document.getElementById("notes");
+      if (s.changes.length) {
+        // Server sends newest first; a chat log reads oldest first, newest at the bottom.
+        const atBottom = notes.scrollHeight - notes.scrollTop - notes.clientHeight < 40;
+        const before = notes.children.length;
+        notes.replaceChildren(...s.changes.slice(0, 30).reverse().map(c => {
+          const li = document.createElement("li");
+          li.style.setProperty("--c", color[c.item]);
+          const what = c.from ? `${cap(c.item)} moved from the ${c.from} to the ${c.to}.` : `${cap(c.item)} spotted in the ${c.to}.`;
+          li.innerHTML = `<time>${fmtTime(c.t)}</time><span>${what}</span>`;
+          return li;
+        }));
+        // Follow new messages unless someone scrolled up to read older ones.
+        if (atBottom || before <= 1) notes.scrollTop = notes.scrollHeight;
+      }
+    } catch (e) {
+      document.getElementById("clock").textContent = "Reconnecting…";
+    }
+    setTimeout(tick, 1000);
+  }
+  tick();
+</script>
+</body></html>

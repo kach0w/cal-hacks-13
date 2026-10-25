@@ -2,6 +2,7 @@
 
     python -m recall.live                       # camera 0
     python -m recall.live --show                # + overlay window (q quits)
+    python -m recall.live --web                 # + web page: board, ask box, guidance
     python -m recall.live --src demo.mp4 --show # replay a recording into data/replay/
     python -m recall.live --src demo.mp4 --show --set REPLAY_SPEED=1    # watch it in real time
     python -m recall.live --src demo.mp4 --snapshots data/shots         # every pass as a jpg
@@ -114,7 +115,8 @@ def show_window(pipeline, source, memory, room=None):
             break
 
 
-def run(cfg, items, places, source, detector, store, room=None, show=False, snapshots=None) -> Pipeline:
+def run(cfg, items, places, source, detector, store, room=None, show=False, snapshots=None,
+        web=False) -> Pipeline:
     """Memory + the detection thread on `source`; blocks until the video ends, q, or Ctrl-C.
     room: the registered room (xyz + surfaces), or None. snapshots: a folder that gets the
     overlay of every detection pass (no window needed)."""
@@ -141,6 +143,9 @@ def run(cfg, items, places, source, detector, store, room=None, show=False, snap
     old = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
     try:
         pipeline.start()
+        if web:
+            from .web import Web
+            print(f"Recall web page: {Web(cfg, items, memory, pipeline, places, room).start()}")
         if show:
             show_window(pipeline, source, memory, room)
         else:
@@ -166,6 +171,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Run the camera memory.")
     ap.add_argument("--src", help="camera index or a video file to replay (default: SRC setting)")
     ap.add_argument("--show", action="store_true", help="overlay window (q quits)")
+    ap.add_argument("--web", action="store_true", help="web page: board, ask box, left/right guidance")
     ap.add_argument("--snapshots", type=Path, metavar="DIR", help="save the overlay of every detection pass")
     config.add_args(ap)
     a = ap.parse_args(argv)
@@ -189,7 +195,7 @@ def main(argv=None):
     if not source.live:
         store.clear()
         log.info("replaying %s into %s", cfg.src, store.root)
-    if run(cfg, items, places, source, detector, store, room, a.show, a.snapshots).crashed:
+    if run(cfg, items, places, source, detector, store, room, a.show, a.snapshots, a.web).crashed:
         raise SystemExit(1)
 
 

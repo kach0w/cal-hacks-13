@@ -22,3 +22,5 @@ mobileclip*.ts
 .DS_Store
 range_log.csv
 p.md
+# band firmware wifi password
+firmware/band/secrets.h
