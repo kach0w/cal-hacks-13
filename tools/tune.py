@@ -11,7 +11,8 @@ run: the real ChangeGate, UltralyticsDetector.detect (on the cached boxes) and M
 combination of --grid values (settings, or MIN_SCORE.<item>): exactly the events recall.live would
 log, in milliseconds. Each video is scored against --expect (one file for every take), else its own
 <video>.expect: one event per line, in order (one pass's events in any order), item ids from
-items.json, zone optional, named as in zones.json. Prints a row per combination (fewest missing +
+items.json, place optional (a surface once the room is registered, else a zone, named as in
+surfaces.json / zones.json). Prints a row per combination (fewest missing +
 phantom events, then fewest changes, first), the best one's diff and its flags. A video without an
 expect file prints its events in that format, ready to check and save as one:
 
@@ -42,7 +43,7 @@ from recall.memory import Memory
 from recall.models import Transition
 from recall.perception import DEFAULT_MODEL, UltralyticsDetector, _boxes, make_detector
 from recall.store import Store
-from recall.zones import load_zones
+from recall.live import load_room, setup_places
 
 log = logging.getLogger("recall")
 KINDS = ("appeared", "reappeared", "moved", "disappeared", "inferred_contained")
@@ -157,13 +158,13 @@ def load(path):
     return z["ts"].tolist(), z["small"], boxes, labels, float(z["conf"])
 
 
-def replay(cached, cfg, items, zones) -> list[Transition]:
-    """Pipeline.step on a video, the model's boxes looked up; frame=None, so no stills."""
+def replay(cached, cfg, items, places, room=None) -> list[Transition]:
+    """Pipeline.step on a video, the model's boxes looked up; frame=None, so no photos."""
     ts, smalls, boxes, labels, conf = cached
     model, gate, events = CachedModel(conf), CachedGate(cfg), []
     detector = UltralyticsDetector(items, cfg, model, labels)
     with tempfile.TemporaryDirectory() as tmp:
-        memory = Memory(items, zones, Store(tmp), cfg)
+        memory = Memory(items, places, Store(tmp), cfg, room.pixel_to_world if room else None)
         for t, small, frame_boxes in zip(ts, smalls, boxes):
             if gate.check(small, t)[0]:
                 model.boxes = frame_boxes
@@ -174,9 +175,9 @@ def replay(cached, cfg, items, zones) -> list[Transition]:
 
 
 # --- expectations ---------------------------------------------------------------------------------
-def read_expect(path, items, zones) -> list[tuple]:
-    """[(kind, item, to_zone | None)] from '<kind> <item id> [zone name]' lines."""
-    names, out = [z.name for z in zones], []
+def read_expect(path, items, places) -> list[tuple]:
+    """[(kind, item, to_place | None)] from '<kind> <item id> [place name]' lines."""
+    names, out = places.names(), []
 
     def fail(why):
         raise SystemExit(f"{path}:{n}: {why}")
@@ -185,26 +186,27 @@ def read_expect(path, items, zones) -> list[tuple]:
         words = line.split("#", 1)[0].split()
         if not words:
             continue
-        kind, oid, zone = words[0], words[1] if len(words) > 1 else None, " ".join(words[2:]) or None
+        kind, oid, place = words[0], words[1] if len(words) > 1 else None, " ".join(words[2:]) or None
         if kind not in KINDS or oid is None:
-            fail(f"want '<kind> <item> [zone]', kind one of {', '.join(KINDS)}")
+            fail(f"want '<kind> <item> [place]', kind one of {', '.join(KINDS)}")
         if oid not in items:
             fail(f"unknown item {oid!r} (items: {', '.join(items)})")
-        if zone and kind == "disappeared":
-            fail("'disappeared' takes no zone: the item is gone")
-        if zone and zone not in names:
-            fail(f"unknown zone {zone!r} (zones: {', '.join(names) or 'none yet'})")
-        out.append((kind, oid, zone))
+        if place and kind == "disappeared":
+            fail("'disappeared' takes no place: the item is gone")
+        if place and place not in names:
+            kinds = "surfaces" if places.in_3d else "zones"
+            fail(f"unknown place {place!r} ({kinds}: {', '.join(names) or 'none yet'})")
+        out.append((kind, oid, place))
     return out
 
 
 def key(t: Transition) -> tuple:
-    return t.kind, t.object_id, t.to_zone
+    return t.kind, t.object, t.to_surface
 
 
 def align(expected, events) -> list[tuple]:
     """Most matches, in order -> [(expected | None, Transition | None)]. The events of one pass (one ts)
-    match in any order: memory.update emits them in items.json order. No expected zone matches any."""
+    match in any order: memory.update emits them in items.json order. No expected place matches any."""
     after = [(0, [(e, None) for e in expected[i:]]) for i in range(len(expected) + 1)]
     for one_pass in reversed([list(g) for _, g in itertools.groupby(events, key=lambda t: t.ts)]):
         after = _with_pass(expected, one_pass, after)
@@ -213,7 +215,7 @@ def align(expected, events) -> list[tuple]:
 
 def _with_pass(expected, group, after) -> list[tuple]:
     """after[i]: (matches, pairs) of expected[i:] against the later passes -> the same from this one."""
-    ok = lambda e, t: e[:2] == (t.kind, t.object_id) and e[2] in (None, t.to_zone)
+    ok = lambda e, t: e[:2] == (t.kind, t.object) and e[2] in (None, t.to_surface)
 
     @functools.cache
     def best(i, used):   # bit k of used: group[k] is matched already
@@ -279,12 +281,16 @@ def combos(grid, base_set):
         yield values, cfg, items
 
 
-def run(videos, expects, grid, base_set) -> list[Row]:
-    """Every video replayed under every combination, best first."""
+def run(videos, expects, grid, base_set, places=None, room=None) -> list[Row]:
+    """Every video replayed under every combination, best first. places, room: as recall.live sets
+    them up from the base settings (xyz + surfaces once registered); set up here if not given."""
     base, loaded, rows = settings(base_set), {}, []
     base_items = load_items(base.items_path)
+    if places is None:
+        room = load_room(base)
+        places = setup_places(base, room)
     for values, cfg, items in list(combos(grid, base_set)):   # every combination checked before any replay
-        zones, events = load_zones(cfg.zones_path), []
+        events = []
         for video in videos:
             path = cache_path(video, cfg, items)
             if path not in loaded:
@@ -295,20 +301,20 @@ def run(videos, expects, grid, base_set) -> list[Row]:
                     raise SystemExit(f"{video} isn't cached for these settings; first run:\n"
                                      f"  python -m tools.tune cache {video}{flags}")
                 loaded[path] = load(path)
-            events.append(replay(loaded[path], cfg, items, zones))
+            events.append(replay(loaded[path], cfg, items, places, room))
         changes = sum(resolved(k, cfg, items) != resolved(k, base, base_items) for k in values)
         scores = [None if exp is None else score(exp, ev) for exp, ev in zip(expects, events)]
         rows.append(Row(values, cfg, changes, events, scores, sum(sum(s) for s in scores if s)))
     return sorted(rows, key=lambda r: (r.total, r.changes))
 
 
-def expect_files(videos, given, items, zones) -> list:
+def expect_files(videos, given, items, places) -> list:
     """Each video's expected events: the --expect file (one for every take), else its own
     <video>.expect, else None."""
     if given and not given.is_file():
         raise SystemExit(f"--expect {given}: no such file")
     paths = [given or v.with_suffix(".expect") for v in videos]
-    return [read_expect(p, items, zones) if p.is_file() else None for p in paths]
+    return [read_expect(p, items, places) if p.is_file() else None for p in paths]
 
 
 def report(rows, videos, expects):
@@ -361,9 +367,11 @@ def main(argv=None):
         for v in a.videos:
             cache(v, cfg, detector)
         return
-    expects = expect_files(a.videos, a.expect, load_items(cfg.items_path), load_zones(cfg.zones_path))
+    room = load_room(cfg)
+    places = setup_places(cfg, room)
+    expects = expect_files(a.videos, a.expect, load_items(cfg.items_path), places)
     t0 = time.time()
-    rows = run(a.videos, expects, parse_grid(a.grid), a.set)
+    rows = run(a.videos, expects, parse_grid(a.grid), a.set, places, room)
     log.info("replayed %d settings x %d videos in %.1f s", len(rows), len(a.videos), time.time() - t0)
     report(rows, a.videos, expects)
 

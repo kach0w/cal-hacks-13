@@ -9,7 +9,7 @@ calibrate: put one item in view; the window shows the detector's best box for it
 box is right (saves a crop + its score), 3 samples per item (move/rotate it between them),
 n = next item, q or ESC = quit; an item keeps the samples accepted before n, q, Ctrl-C or the end
 of a video (none: unchanged). Sets min_score = 0.6 x the lowest accepted score. Re-run in demo
-lighting at the demo camera position (DESIGN §8). The crops in data/enroll/<id>/ are the re-id
+lighting at the demo camera position. The crops in data/enroll/<id>/ are the re-id
 references; an item's crops are replaced as a set when it ends, never one by one.
 """
 import argparse
@@ -81,7 +81,7 @@ def _samples(it, det, src, cfg, samples) -> bool:
             continue
         check_size(frame.image, cfg)
         s = next((x for x in det.detect(frame.image, frame.ts, raw=True).sightings
-                  if x.object_id == it.id), None)
+                  if x.object == it.id), None)
         crop = _crop(frame.image, s.bbox) if s else None
         view = frame.image.copy()
         if s:

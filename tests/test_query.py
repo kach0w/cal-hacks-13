@@ -13,12 +13,12 @@ DEMO_ITEMS = {**ITEMS, "bag": _it("bag", "bag", "brown paper bag", container=Tru
 
 
 def put(store, *objs, beat=NOW - 1, camera_ok=True):
-    store.save({o.object_id: o for o in objs}, beat)
+    store.save({o.object: o for o in objs}, beat)
     store.beat(beat, camera_ok)
 
 
 def obs(oid, name, zone, seen, **kw):
-    return ObjectState(oid, name, zone=zone, status="observed", confidence=0.6,
+    return ObjectState(oid, name, surface=zone, status="observed", confidence=0.6,
                        since=seen, last_observed=seen, **kw)
 
 
@@ -29,10 +29,10 @@ def test_templates(tmp_path):
     put(store,
         obs("keys", "keys", "kitchen counter", NOW - 3),
         obs("wallet", "wallet", None, NOW - 120),
-        ObjectState("glasses", "glasses", zone="table", status="inferred", confidence=0.9,
+        ObjectState("glasses", "glasses", surface="table", status="inferred", confidence=0.9,
                     since=went_in, last_observed=went_in, container="bag"),
         obs("bag", "bag", "table", NOW - 1),
-        ObjectState("phone", "phone", zone="table", status="unknown", confidence=0.4,
+        ObjectState("phone", "phone", surface="table", status="unknown", confidence=0.4,
                     since=NOW - 900, last_observed=NOW - 900))
     t = lambda oid: q.where_is(oid, now=NOW).text
     assert t("keys") == "Your keys are on the kitchen counter — seen just now."
@@ -108,7 +108,7 @@ def test_stall_before_any_frame(tmp_path):
 
 # --- history, describe, routing ------------------------------------------------------------
 def ev(kind, oid="glasses", frm="table", to="table", status="inferred", container="bag", ts=NOW - 10):
-    return Transition(oid, oid, kind, frm, to, status, container, 0.9, ts, clock_s(ts), None)
+    return Transition(oid, oid, kind, frm, to, None, None, status, container, 0.9, ts, clock_s(ts), None)
 
 
 def test_describe_uses_names(tmp_path):
@@ -146,10 +146,10 @@ def test_state_at_and_diff(tmp_path):
     _, store, _, q = world(tmp_path)
     store.append(ev("appeared", "keys", None, "table", "observed", None, NOW - 100))
     store.append(ev("moved", "keys", "table", "kitchen counter", "observed", None, NOW - 50))
-    assert q.state_at(NOW - 75) == {"keys": {"zone": "table", "status": "observed", "container": None}}
-    assert q.diff(NOW - 75) == [{"object_id": "keys",
-                                 "before": {"zone": "table", "status": "observed", "container": None},
-                                 "now": {"zone": "kitchen counter", "status": "observed", "container": None}}]
+    assert q.state_at(NOW - 75) == {"keys": {"surface": "table", "status": "observed", "container": None}}
+    assert q.diff(NOW - 75) == [{"object": "keys",
+                                 "before": {"surface": "table", "status": "observed", "container": None},
+                                 "now": {"surface": "kitchen counter", "status": "observed", "container": None}}]
     assert q.diff(NOW - 10) == []
 
 

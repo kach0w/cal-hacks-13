@@ -1,7 +1,10 @@
 """Part E bridge: the corner camera registered inside the scanned room (CAMERA.md §7, handoffAB.md).
 
-World frame: meters, Y-up, floor at y = 0. camera.json holds OpenCV intrinsics (K, dist) and the
-world->camera pose X_cam = R·X_world + t (camera x right, y down, z forward).
+Reads what the setup tools (tools/scan_to_room.py, register_camera.py) write to data/room/, with
+their conventions (tools/roomlib.py): world in metres, Y up, floor at y = 0; camera.json holds
+OpenCV intrinsics (K, dist) and the world->camera pose X_cam = R·X_world + t (camera x right,
+y down, z forward). This is the runtime half handoffAB.md gives B: xyz_map, pixel_to_world,
+floor_hit, world_to_pixel.
 """
 import hashlib
 import json
@@ -22,12 +25,13 @@ PLANE_BIN_M = 0.1  # flat surfaces are grouped into planes by their offset, in b
 ORTHO_TOL = 1e-3  # camera.json R further than this from a rotation is a broken file, not rounding
 EDGE_M = 0.05  # an xyz_map cell spanning more than this straddles a depth edge: don't blend the surfaces
 MIN_RANGE_M = 0.2  # rays start this far out, past the webcam and its mount if they are in the scan
+NEAR_M = 0.05  # in_lens: points closer in front of the lens than this aren't drawn
 # cv2.undistortPoints' default (5 iterations) is off by pixels at the image edges with real lens
 # distortion; iterate until reprojecting the result lands back on the input pixel.
 UNDISTORT_CRITERIA = (cv2.TERM_CRITERIA_COUNT | cv2.TERM_CRITERIA_EPS, 100, 1e-10)
 UNDISTORT_PX = 0.05  # a ray that reprojects further than this from its pixel didn't converge
 # Camera axes OpenCV (x right, y down, looks down +z) <-> GL/ARKit/three.js (x right, y up, looks down -z).
-CV_TO_GL = np.diag([1.0, -1.0, -1.0])
+CV_TO_GL = np.diag([1.0, -1.0, -1.0])  # roomlib.FLIP_YZ
 
 
 def undistort(uv, K, dist):
@@ -92,13 +96,14 @@ def gl_to_opencv(T):
 
 
 def read_mesh(path):
-    """room.glb -> (vertices (V, 3) float64, triangles (F, 3) int). Raises if Open3D can't read it."""
-    import open3d as o3d
+    """room.glb -> (vertices (V, 3) float64, triangles (F, 3) int), loaded the way the setup tools
+    load it (roomlib.Mesh.load): trimesh, every node merged with its transform baked in."""
+    import trimesh
 
-    mesh = o3d.io.read_triangle_mesh(str(path))
-    if not mesh.has_triangles():
-        raise ValueError(f"{path}: no triangles (point cloud, or Draco/meshopt-compressed?)")
-    return np.asarray(mesh.vertices, np.float64), np.asarray(mesh.triangles)
+    mesh = trimesh.load(path, force="mesh")
+    if not len(getattr(mesh, "faces", ())):
+        raise ValueError(f"{path}: no triangles (a point cloud, or a compressed glTF?)")
+    return np.asarray(mesh.vertices, np.float64), np.asarray(mesh.faces)
 
 
 def planes(vertices, triangles, axis):
@@ -118,7 +123,7 @@ def mesh_frame_problems(vertices, triangles):
     """Reasons the mesh may not be in the world frame (Y-up, floor at y = 0); empty if it looks right.
 
     A box room looks the same along every axis, so the axis test only flags a largest horizontal
-    plane far smaller than a wall; register_camera checks the mesh against markers.json properly.
+    plane far smaller than a wall; tools/check_room.py checks the room against tape measurements.
     """
     found = [planes(vertices, triangles, a) for a in range(3)]
     biggest = [area.max(initial=0.0) for _, area in found]
@@ -162,7 +167,7 @@ class Room:
 
     def __init__(self, camera, vertices=None, triangles=None, room_dir=None, mesh_error=None):
         if "R" not in camera or "t" not in camera:
-            raise ValueError("camera.json has no pose (R, t): run python -m tools.register_camera")
+            raise ValueError("camera.json has no pose (R, t): run uv run tools/register_camera.py")
         self.width, self.height = int(camera["width"]), int(camera["height"])
         self.K = np.array(camera["K"], np.float64)
         self.dist = np.array(camera.get("dist") or [0.0] * 5, np.float64)
@@ -170,7 +175,7 @@ class Room:
         self.R = orthonormalize(R)  # rays and projectPoints (via Rodrigues) must use the same rotation
         if np.abs(self.R - R).max() > ORTHO_TOL:
             log.warning("camera.json R is not a rotation (off by %.1e): using the nearest one; re-run "
-                        "python -m tools.register_camera", np.abs(self.R - R).max())
+                        "uv run tools/register_camera.py", np.abs(self.R - R).max())
         self.t = np.array(camera["t"], np.float64).reshape(3)
         self.center = -self.R.T @ self.t
         self.dir = Path(room_dir) if room_dir else None
@@ -180,7 +185,10 @@ class Room:
         # Computed now: a map built later must not be saved under a camera.json rewritten meanwhile.
         self._key = self._inputs_key()
         u, v = np.meshgrid(np.linspace(0, self.width - 1, 81), np.linspace(0, self.height - 1, 46))
-        lost = np.isnan(undistort(np.c_[u.ravel(), v.ravel()], self.K, self.dist)[:, 0]).mean()
+        xy = undistort(np.c_[u.ravel(), v.ravel()], self.K, self.dist)
+        lost = np.isnan(xy[:, 0]).mean()
+        # How far off-axis the image reaches (tan of the angle, corners included), with some slack.
+        self.max_r = 1.05 * float(np.nanmax(np.hypot(*xy.T), initial=0.0))
         if lost:
             log.warning("lens model (dist) has no inverse at %.1f%% of the image, near its corners: those pixels "
                         "map to None. Recalibrate with the board in the image corners", 100 * lost)
@@ -204,7 +212,7 @@ class Room:
         if glb.exists():
             try:
                 vertices, triangles = read_mesh(glb)
-            except (ImportError, ValueError, RuntimeError) as e:
+            except Exception as e:  # any unreadable mesh: fall back rather than stop the demo
                 error = f"{type(e).__name__}: {e}"
                 log.warning("could not load %s (%s); falling back to %s or the floor plane", glb, error, XYZ_MAP)
         return cls(camera, vertices, triangles, room_dir, error)
@@ -225,6 +233,15 @@ class Room:
         """World point -> pixel through the lens, for overlays (doesn't check the point is in front)."""
         u, v = project([[x, y, z]], self.K, self.dist, self.R, self.t)[0]
         return float(u), float(v)
+
+    def in_lens(self, points) -> np.ndarray:
+        """Which world points (N, 3) project faithfully: in front of the camera and no further off-axis
+        than the image reaches. Past that the dist polynomial can fold back, and world_to_pixel puts a
+        point far off to the side inside the image."""
+        cam = np.asarray(points, np.float64).reshape(-1, 3) @ self.R.T + self.t
+        with np.errstate(divide="ignore", invalid="ignore"):
+            r = np.hypot(cam[:, 0], cam[:, 1]) / cam[:, 2]
+        return (cam[:, 2] > NEAR_M) & (r <= self.max_r)
 
     def surface_distance(self, points) -> np.ndarray:
         """Distance (m) from each world point (N, 3) to the nearest mesh surface. Needs the mesh."""

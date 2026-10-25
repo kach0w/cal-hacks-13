@@ -17,7 +17,6 @@ from .enroll import load_items
 from .models import Answer
 from .query import Query, clock, parse_since, stamp
 from .store import Store
-from .zones import load_zones, zone_phrase
 
 
 def match_item(items, text) -> str | None:
@@ -54,14 +53,14 @@ def handle(text, q: Query, now=None) -> Answer:
                  else f"- {q.name(oid)}: never seen" for oid in items]
         return stamp(Answer("\n".join(lines) if state else "No memory yet.", "info"), as_of)
 
-    zones = load_zones(q.cfg.zones_path)
+    places = q.places()
     if t.startswith("diff"):
         since = parse_since(_since_arg(t), now)
         d = q.diff(since)
         fmt = lambda s: "not seen" if s is None else (
-            f"{s['status']} {zone_phrase(zones, s['zone'])}"
+            f"{s['status']} {places.phrase(s['surface'])}"
             + (f" (in {q.name(s['container'])})" if s.get("container") else ""))
-        text = "\n".join(f"- {q.name(x['object_id'])}: {fmt(x['before'])}  →  {fmt(x['now'])}"
+        text = "\n".join(f"- {q.name(x['object'])}: {fmt(x['before'])}  →  {fmt(x['now'])}"
                          for x in d) or f"Nothing is different from {clock(since)}."
         return stamp(Answer(text, "info"), as_of)
 
@@ -70,13 +69,13 @@ def handle(text, q: Query, now=None) -> Answer:
         if not oid:
             return Answer("History of what? e.g. 'history keys'", "info")
         h = q.history(oid)
-        return stamp(Answer("\n".join(f"{clock(e.ts)}  {q.describe(e, zones)}" for e in h)
+        return stamp(Answer("\n".join(f"{clock(e.ts)}  {q.describe(e, places)}" for e in h)
                             or "No history.", "info"), as_of)
 
     if ("change" in t or "moved" in t) and "where" not in t:
         since = parse_since(_since_arg(t), now)
         ev = q.changes_since(since)
-        text = ("\n".join(f"{clock(e.ts)}  {q.describe(e, zones)}" for e in ev)
+        text = ("\n".join(f"{clock(e.ts)}  {q.describe(e, places)}" for e in ev)
                 or f"Nothing has changed since {clock(since)}.")
         return stamp(Answer(text, "info"), as_of)
 
@@ -96,7 +95,7 @@ def main():
 
     def answer(text):
         r = handle(text, q)
-        extra = f"\n  [{r.status} {r.confidence:.2f}] still: {r.still_path}" if r.still_path else ""
+        extra = f"\n  [{r.status} {r.confidence:.2f}] photo: {r.photo_path}" if r.photo_path else ""
         return r.text + extra
 
     if a.text:

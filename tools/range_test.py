@@ -92,7 +92,7 @@ def run(det, items, frames):
     det.detect(frames[0], 0, raw=True)  # warm up this imgsz
     scores, boxes, t0, last = {i: [] for i in items}, {i: [] for i in items}, time.time(), None
     for img in frames:
-        last = {s.object_id: s for s in det.detect(img, 0, raw=True).sightings}
+        last = {s.object: s for s in det.detect(img, 0, raw=True).sightings}
         for i in items:
             scores[i].append(last[i].score if i in last else 0.0)
             if i in last:
@@ -145,8 +145,8 @@ def evaluate(cfg, out, detectors, sizes):
                 print(f"  {st:<6} {ms:5.0f} ms  " + "  ".join(cells))
                 sheet = imgs[-1].copy()
                 for s in last.values():
-                    label_box(sheet, s.bbox, f"{items[s.object_id].name} {s.score:.2f}",
-                              GREEN if s.score >= thr(s.object_id) else AMBER)
+                    label_box(sheet, s.bbox, f"{items[s.object].name} {s.score:.2f}",
+                              GREEN if s.score >= thr(s.object) else AMBER)
                 cv2.imwrite(str(report / f"{st}_{kind}_{size}.jpg"), banner(sheet, f"{st} {kind} {size}"))
             results.append(row)
     print(f"\nhit = seen at >= the item's threshold (min_score, else {cfg.default_min_score}); "

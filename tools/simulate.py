@@ -13,7 +13,7 @@ Modes:
               the detector won't find it and containment can't happen)
 
 Writes data/sim/: sim.mp4 (the scene at 10 fps), zones.json, and <mode>/ with the memory
-(state.json, events.jsonl, stills/), screens/ (overlay of every detection pass) and
+(state.json, events.jsonl, photos/), screens/ (overlay of every detection pass) and
 contact_sheet.jpg (all of them on one page). Then asks the memory a few questions.
 """
 import argparse
@@ -31,6 +31,7 @@ from recall.camera import VideoSource
 from recall.enroll import load_items
 from recall.live import run
 from recall.models import Sighting, Zone
+from recall.places import Places
 from recall.perception import Detections, make_detector
 from recall.query import Query
 from recall.store import Store
@@ -188,7 +189,7 @@ def main():
     for old in (out / "screens").glob("*.jpg"):
         old.unlink()
     log.info("simulating %s mode: %s -> %s", a.mode, video, out)
-    run(cfg, items, ZONES, source, detector, store, a.show, out / "screens")
+    run(cfg, items, Places(ZONES), source, detector, store, None, a.show, out / "screens")
     contact_sheet(out / "screens", out / "contact_sheet.jpg")
 
     q = Query(cfg, items, store)

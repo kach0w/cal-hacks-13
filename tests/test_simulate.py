@@ -10,7 +10,7 @@ def test_scripted_simulation(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["simulate", "--set", f"DATA_DIR={tmp_path}"])
     simulate.main()
     out = tmp_path / "sim" / "scripted"
-    events = [(e.kind, e.object_id, e.from_zone, e.to_zone) for e in Store(out).events()]
+    events = [(e.kind, e.object, e.from_surface, e.to_surface) for e in Store(out).events()]
     assert events == [
         ("appeared", "keys", None, "kitchen counter"),
         ("appeared", "glasses", None, "kitchen counter"),

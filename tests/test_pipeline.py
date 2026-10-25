@@ -45,7 +45,7 @@ class ScriptedDetector:
     def detect(self, image, ts, raw=False):
         self.calls += 1
         time.sleep(self.delay)
-        return Detections([S(s.object_id, s.bbox) for s in self.sightings])
+        return Detections([S(s.object, s.bbox) for s in self.sightings])
 
 
 def busy(i):
@@ -219,7 +219,7 @@ def test_skipped_passes_keep_the_last_boxes(tmp_path):
         p.step()
         clk.t += 1
     r = p.latest()
-    assert r.reason == "static" and [s.object_id for s in r.detections.sightings] == ["keys"]
+    assert r.reason == "static" and [s.object for s in r.detections.sightings] == ["keys"]
 
 
 # --- video replay -------------------------------------------------------------------------------

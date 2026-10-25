@@ -39,7 +39,7 @@ class Settings:
     # --- perception ----------------------------------------------------------
     detector: str = "yolo-world"       # yolo-world | yoloe | yolo (fine-tuned; class names = item ids)
     detect_model: str = ""             # "" = the backend's default (perception.DEFAULT_MODEL); downloads once
-    detect_imgsz: int = 640
+    detect_imgsz: int = 1280           # DESIGN §9: 640 loses small objects past ~2 m
     detect_device: str = ""            # "" = mps on Apple silicon, else ultralytics' choice; or cpu
     default_min_score: float = 0.15    # YOLO-World scores run low; calibration sets per item
 
@@ -48,6 +48,7 @@ class Settings:
     move_confirm_n: int = 2            # same new zone N looks in a row before committing a move
     contain_overlap: float = 0.25      # fraction of the object's last box inside the container's box
     zone_margin_px: float = 10.0       # base point may sit this far outside a zone box
+    surface_margin_m: float = 0.05     # world point may sit this far outside a surface box
 
     # --- re-id (task 6; only used when an identity check is plugged in) ------
     reid_accept: float = 0.80          # cosine to the item's references: commit
@@ -64,6 +65,10 @@ class Settings:
     @property
     def room_dir(self) -> Path:
         return self.data_dir / "room"
+
+    @property
+    def surfaces_path(self) -> Path:
+        return self.room_dir / "surfaces.json"
 
     @property
     def replay_dir(self) -> Path:

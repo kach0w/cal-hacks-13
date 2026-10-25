@@ -1,4 +1,4 @@
-"""The detection thread (DESIGN §7.1 rule 1): perception never blocks capture.
+"""The detection thread (DESIGN §9.1 rule 1): perception never blocks capture.
 
 Once per LOOP_S it takes the newest frame and runs  stall check -> change gate -> detect -> memory.
 If a live camera delivers no new frame for STALE_AFTER_S the memory is frozen: no detection and no
@@ -138,7 +138,7 @@ class Pipeline:
 
     def _log_pass(self, r: Result):
         m = self.memory
-        seen = ", ".join(f"{m.items[s.object_id].name}@{m.zone_of(s.bbox) or '?'} {s.score:.2f}"
+        seen = ", ".join(f"{m.items[s.object].name}@{m.locate(s.bbox)[0] or '?'} {s.score:.2f}"
                          for s in r.detections.sightings) or "nothing"
         persons = f"  (+{len(r.detections.persons)} person)" if r.detections.persons else ""
         log.debug("[%-9s %.3f] seen: %s%s", r.reason, self.gate.last_fraction, seen, persons)

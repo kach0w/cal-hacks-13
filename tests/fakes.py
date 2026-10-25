@@ -6,6 +6,7 @@ import numpy as np
 from recall.config import Settings
 from recall.memory import Memory
 from recall.models import Item, Sighting, Zone
+from recall.places import Places
 from recall.query import Query
 from recall.store import Store
 from recall.zones import save_zones
@@ -47,8 +48,8 @@ def world(tmp, items=ITEMS, zones=ZONES, pixel_to_world=None, **overrides):
     cfg = replace(Settings(data_dir=tmp, items_path=tmp / "items.json"), **overrides)
     save_zones(zones, cfg.zones_path)
     store = Store(tmp)
-    return cfg, store, Memory(items, zones, store, cfg, pixel_to_world), Query(cfg, items, store)
+    return cfg, store, Memory(items, Places(zones), store, cfg, pixel_to_world), Query(cfg, items, store)
 
 
 def kinds(events):
-    return [f"{e.kind}:{e.object_id}" for e in events]
+    return [f"{e.kind}:{e.object}" for e in events]

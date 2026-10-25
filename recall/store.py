@@ -1,8 +1,8 @@
-"""The Store (DESIGN §4): the memory's files. The live process writes; anything can read.
+"""The Store (DESIGN §6): the memory's files. The live process writes; anything can read.
 
     state.json       current WorldState (atomic rewrite)
     events.jsonl     append-only Transitions — history, diffs and "what changed" replay this
-    stills/          the annotated picture behind each transition
+    photos/          the annotated picture behind each transition (photo_path)
     heartbeat.json   {last_frame_ts, camera_ok}: how fresh the memory is
 """
 import json
@@ -33,7 +33,8 @@ def write_json_atomic(path, obj):
 
 
 class Store:
-    STATE, EVENTS, STILLS, HEARTBEAT = "state.json", "events.jsonl", "stills", "heartbeat.json"
+    STATE, EVENTS, PHOTOS, HEARTBEAT = "state.json", "events.jsonl", "photos", "heartbeat.json"
+    OLD_PHOTOS = "stills"  # where photos went before the DESIGN §7 rename (models.RENAMED)
 
     def __init__(self, root):
         self.root = Path(root)
@@ -58,10 +59,10 @@ class Store:
         with open(p, "a") as f:
             f.write(("\n" if torn else "") + json.dumps(t.to_dict()) + "\n")
 
-    def save_still(self, image, name: str) -> str:
+    def save_photo(self, image, name: str) -> str:
         import cv2
-        rel = f"{self.STILLS}/{name}.jpg"
-        (self.root / self.STILLS).mkdir(parents=True, exist_ok=True)
+        rel = f"{self.PHOTOS}/{name}.jpg"
+        (self.root / self.PHOTOS).mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(self.root / rel), image)
         return rel
 
@@ -69,7 +70,8 @@ class Store:
         """Forget everything (replays start from an empty memory)."""
         for name in (self.STATE, self.EVENTS, self.HEARTBEAT):
             (self.root / name).unlink(missing_ok=True)
-        shutil.rmtree(self.root / self.STILLS, ignore_errors=True)
+        for name in (self.PHOTOS, self.OLD_PHOTOS):
+            shutil.rmtree(self.root / name, ignore_errors=True)
 
     # --- read side (anyone) ---------------------------------------------------
     def load_state(self) -> dict[str, ObjectState]:
@@ -92,8 +94,9 @@ class Store:
     def heartbeat(self) -> dict | None:
         return read_json(self.root / self.HEARTBEAT, None)
 
-    def still_file(self, rel: str) -> Path | None:
-        """Absolute path of a still from its state/event still_path; None if missing or outside stills/."""
+    def photo_file(self, rel: str) -> Path | None:
+        """Absolute path of a photo from a state/event photo_path; None if missing or outside photos/
+        (or the stills/ of older memory files)."""
         p = (self.root / rel).resolve()
-        stills = (self.root / self.STILLS).resolve()
-        return p if p.is_relative_to(stills) and p.is_file() else None
+        dirs = [(self.root / d).resolve() for d in (self.PHOTOS, self.OLD_PHOTOS)]
+        return p if any(p.is_relative_to(d) for d in dirs) and p.is_file() else None

@@ -14,6 +14,7 @@ from recall.config import ROOT, load_settings
 from recall.enroll import load_items, save_items
 from recall.gate import ChangeGate
 from recall.models import Item, Transition
+from recall.places import Places
 from recall.perception import PERSON, UltralyticsDetector
 from recall.store import Store
 from recall.zones import save_zones
@@ -135,7 +136,7 @@ def base(tmp_path):
 
 
 def logged(t):
-    return t.kind, t.object_id, t.from_zone, t.to_zone, t.status, t.container, t.confidence, t.ts
+    return t.kind, t.object, t.from_surface, t.to_surface, t.status, t.container, t.confidence, t.ts
 
 
 # Settings and per-item thresholds, each run through recall.live and through the tune replay.
@@ -166,7 +167,7 @@ def test_replay_logs_exactly_what_live_logs(video, base, tmp_path):
         [row] = tune.run([video[0]], [None], grid, base)
         items = {k: replace(it, min_score=thresholds.get(k)) for k, it in ITEMS.items()}
         store = Store(tmp_path / f"live{n}")
-        live.run(cfg, items, simulate.ZONES, VideoSource(str(video[0]), cfg.loop_s),
+        live.run(cfg, items, Places(simulate.ZONES), VideoSource(str(video[0]), cfg.loop_s),
                  SceneDetector(video, items, cfg, noisy), store)
         logs.append([logged(t) for t in store.events()])
         assert [logged(t) for t in row.events[0]] == logs[-1], (sets, thresholds)
@@ -196,23 +197,23 @@ def test_cached_gate_sees_what_the_live_gate_sees(video, base):
 def test_expect_file(tmp_path):
     p = tmp_path / "demo.expect"
     p.write_text(SCRIPT)
-    exp = tune.read_expect(p, ITEMS, simulate.ZONES)
+    exp = tune.read_expect(p, ITEMS, Places(simulate.ZONES))
     assert len(exp) == 11 and exp[0] == ("appeared", "keys", "kitchen counter")
     assert exp[6] == ("disappeared", "glasses", None) and exp[-1] == ("moved", "glasses", "kitchen counter")
     # Lines that could never match, so would only ever count as missing (CAMERA.md's zone names are examples)
     for text, error in [
-            ("appeared keys\nvanished keys", r"demo.expect:2: want '<kind> <item> \[zone\]'"),
+            ("appeared keys\nvanished keys", r"demo.expect:2: want '<kind> <item> \[place\]'"),
             ("appeared keys\n\nappeared glases", r"demo.expect:3: unknown item 'glases' \(items: keys, glasses"),
-            ("moved keys counter", r"demo.expect:1: unknown zone 'counter' \(zones: kitchen counter, table\)"),
-            ("moved keys Table", "unknown zone 'Table'"),
-            ("disappeared keys table", "'disappeared' takes no zone")]:
+            ("moved keys counter", r"demo.expect:1: unknown place 'counter' \(zones: kitchen counter, table\)"),
+            ("moved keys Table", "unknown place 'Table'"),
+            ("disappeared keys table", "'disappeared' takes no place")]:
         p.write_text(text)
         with pytest.raises(SystemExit, match=error):
-            tune.read_expect(p, ITEMS, simulate.ZONES)
+            tune.read_expect(p, ITEMS, Places(simulate.ZONES))
 
 
 def event(kind, oid, zone, ts):
-    return Transition(oid, oid, kind, None, zone, "observed", None, 0.9, ts, "", None)
+    return Transition(oid, oid, kind, None, zone, None, None, "observed", None, 0.9, ts, "", None)
 
 
 def test_alignment_counts_missing_and_phantom():
@@ -250,7 +251,7 @@ def test_grid_catches_the_hand_pass(video, base, tmp_path, capsys):
     assert "\n  + " not in out and "\n  - " not in out
     recommend = next(ln for ln in out.splitlines() if ln.startswith("recommend:"))
     assert "MISSING_AFTER_K" not in recommend and "--set DETECT_DEVICE=cpu" in recommend
-    expected = tune.read_expect(tmp_path / "demo.expect", ITEMS, simulate.ZONES)
+    expected = tune.read_expect(tmp_path / "demo.expect", ITEMS, Places(simulate.ZONES))
     rows = tune.run([video[0]], [expected], tune.parse_grid(["MISSING_AFTER_K=1,3"]), base)
     assert [(r.values, r.scores) for r in rows] == [({"MISSING_AFTER_K": "3"}, [(0, 0)]),
                                                     ({"MISSING_AFTER_K": "1"}, [(0, 2)])]
@@ -259,7 +260,7 @@ def test_grid_catches_the_hand_pass(video, base, tmp_path, capsys):
     # The five props appear in the first pass: listed in any order, they still match.
     lines = SCRIPT.splitlines()
     (tmp_path / "demo.expect").write_text("\n".join([lines[5], *lines[:5], *lines[6:]]))
-    reordered = tune.read_expect(tmp_path / "demo.expect", ITEMS, simulate.ZONES)
+    reordered = tune.read_expect(tmp_path / "demo.expect", ITEMS, Places(simulate.ZONES))
     assert reordered[0] == ("appeared", "bag", "table") and tune.score(reordered, rows[0].events[0]) == (0, 0)
     tune.main(["run", str(take2), *flags])            # no expect file: its events, ready to save as one
     out = capsys.readouterr().out
@@ -271,7 +272,7 @@ def test_per_item_threshold_override(video, base, tmp_path, capsys):
     weak_wallet = lambda sec, oid: 0.12 if oid == "wallet" else clean(sec, oid)   # under the 0.15 default
     tune.cache(video[0], load_settings(base), SceneDetector(video, ITEMS, load_settings(base), weak_wallet))
     (tmp_path / "sim.expect").write_text(SCRIPT)
-    expects = tune.expect_files([video[0]], tmp_path / "sim.expect", ITEMS, simulate.ZONES)
+    expects = tune.expect_files([video[0]], tmp_path / "sim.expect", ITEMS, Places(simulate.ZONES))
     rows = tune.run([video[0]], expects, tune.parse_grid(["MIN_SCORE.Wallet=0.2,0.15,0.1"]), base)
     assert [(r.values["MIN_SCORE.wallet"], r.scores[0], r.changes) for r in rows] == [
         ("0.1", (0, 0), 1), ("0.15", (1, 0), 0), ("0.2", (1, 0), 1)]   # a tie goes to the current value
@@ -286,14 +287,14 @@ def test_cache_is_reused(video, base, tmp_path, monkeypatch):
     cfg = load_settings(base)
     det = SceneDetector(video, ITEMS, cfg, clean)
     path = tune.cache(video[0], cfg, det)
-    assert path.parent == tmp_path / "tune" and path.name.startswith("sim__yolo-world_640_")
+    assert path.parent == tmp_path / "tune" and path.name.startswith(f"sim__yolo-world_{cfg.detect_imgsz}_")
     assert tune.cache(video[0], cfg, det) == path and det.calls == simulate.LENGTH_S
     monkeypatch.setattr(tune, "make_detector", lambda *a: pytest.fail("loaded a model for a cached video"))
     tune.main(["cache", str(video[0]), *[a for b in base for a in ("--set", b)]])
     # A new cache for whatever changes the frames read, their tiny copies or the boxes.
     items = load_items(cfg.items_path)
     for k, v in {"loop_s": 0.5, "change_width": 80, "detector": "yoloe", "detect_model": "other.pt",
-                 "detect_imgsz": 1280, "detect_device": "mps"}.items():
+                 "detect_imgsz": 640, "detect_device": "mps"}.items():
         assert tune.cache_path(video[0], replace(cfg, **{k: v}), items) != path, k
     copy = tmp_path / "sim.mp4"
     shutil.copy2(video[0], copy)
@@ -304,3 +305,49 @@ def test_cache_is_reused(video, base, tmp_path, monkeypatch):
     assert tune.cache_path(video[0], cfg, load_items(cfg.items_path)) != path    # new prompt: new cache
     with pytest.raises(SystemExit, match="python -m tools.tune cache"):
         tune.run([video[0]], [None], {}, base)
+
+
+def registered_room(room_dir):
+    """A camera registered over a floor with a 0.75 m table on it (room.glb), and simulate's zones as
+    surfaces: the floor under each zone box, 0.9 m high."""
+    import json
+    import trimesh
+    from recall.room import Room
+    room_dir.mkdir(parents=True, exist_ok=True)
+    z = np.array([0, -0.6, 1.0]) / np.linalg.norm([0, -0.6, 1.0])
+    x = np.array([-1.0, 0, 0])
+    R = np.array([x, np.cross(z, x), z])
+    (room_dir / "camera.json").write_text(json.dumps({
+        "width": 1280, "height": 720, "K": [[900, 0, 640], [0, 900, 360], [0, 0, 1]], "dist": [0] * 5,
+        "R": R.tolist(), "t": (-R @ [0, 2.0, -0.5]).tolist()}))
+    floor = trimesh.Trimesh([[-5, 0, -5], [5, 0, -5], [5, 0, 10], [-5, 0, 10]], [[0, 2, 1], [0, 3, 2]])
+    table = trimesh.creation.box(extents=[1.2, 0.75, 1.0])
+    table.apply_translation([-0.9, 0.375, 3.0])
+    trimesh.util.concatenate([floor, table]).export(room_dir / "room.glb")
+    room, surfaces = Room.load(room_dir), []
+    for zone in simulate.ZONES:
+        x0, y0, x1, y1 = zone.box
+        pts = np.array([room.floor_hit(u, v) for u, v in ((x0, y0), (x1, y0), (x1, y1 - 1), (x0, y1 - 1))])
+        surfaces.append({"name": zone.name, "box_min": [pts[:, 0].min(), -0.1, pts[:, 2].min()],
+                         "box_max": [pts[:, 0].max(), 0.9, pts[:, 2].max()], "prep": "on"})
+    (room_dir / "surfaces.json").write_text(json.dumps(surfaces))
+
+
+def test_replay_with_the_room_logs_exactly_what_live_logs(video, base, tmp_path):
+    """Registered room + surfaces: tune sets up the room and places as recall.live.main does, and the
+    events match whole, positions (from_xyz / to_xyz) included."""
+    registered_room(load_settings(base).room_dir)
+    whole = lambda t: {k: v for k, v in t.to_dict().items() if k != "photo_path"}
+    for n, sets in enumerate([[], ["MISSING_AFTER_K=1", "MOVE_CONFIRM_N=1", "SURFACE_MARGIN_M=0.3"]]):
+        cfg = load_settings([*base, *sets])
+        tune.cache(video[0], cfg, SceneDetector(video, ITEMS, cfg, noisy))
+        [row] = tune.run([video[0]], [None], tune.parse_grid(sets), base)
+        room = live.load_room(cfg)
+        places = live.setup_places(cfg, room)
+        assert places.in_3d and room.source == "mesh"
+        store = Store(tmp_path / f"live{n}")
+        live.run(cfg, ITEMS, places, VideoSource(str(video[0]), cfg.loop_s), SceneDetector(video, ITEMS, cfg, noisy),
+                 store, room)
+        logged_live = [whole(t) for t in store.events()]
+        assert any(e["to_xyz"] for e in logged_live) and any(e["from_xyz"] for e in logged_live)
+        assert [whole(t) for t in row.events[0]] == logged_live, sets

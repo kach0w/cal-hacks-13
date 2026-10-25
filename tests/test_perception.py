@@ -49,7 +49,7 @@ def test_best_box_per_item_and_persons():
                   ([0, 0, 500, 700], P, 0.80),                                # a person
                   ([9, 9, 9, 9], 42, 0.99)])                                  # class we don't know
     dets = d.detect(FRAME, 7.0)
-    assert [(s.object_id, s.bbox, s.score, s.ts) for s in dets.sightings] == [("keys", [5, 5, 20, 20], 0.6, 7.0)]
+    assert [(s.object, s.bbox, s.score, s.ts) for s in dets.sightings] == [("keys", [5, 5, 20, 20], 0.6, 7.0)]
     assert dets.persons == [[0, 0, 500, 700]] and dets.held == set()
 
 
@@ -57,9 +57,9 @@ def test_per_item_thresholds_and_raw_mode():
     items = {k: replace(v, min_score=0.5 if k == "keys" else None) for k, v in ITEMS.items()}
     rows = [([0, 0, 10, 10], 0, 0.40), ([0, 0, 10, 10], 2, 0.20)]
     d = detector(rows, items, default_min_score=0.15)
-    assert [s.object_id for s in d.detect(FRAME, 0).sightings] == ["glasses"]   # keys 0.40 < 0.5
+    assert [s.object for s in d.detect(FRAME, 0).sightings] == ["glasses"]   # keys 0.40 < 0.5
     assert d.model.calls[-1]["conf"] == 0.15                                     # lowest threshold
-    assert {s.object_id for s in d.detect(FRAME, 0, raw=True).sightings} == {"keys", "glasses"}
+    assert {s.object for s in d.detect(FRAME, 0, raw=True).sightings} == {"keys", "glasses"}
     assert d.model.calls[-1]["conf"] == 0.01
 
 
@@ -97,10 +97,10 @@ def test_reid_accepts_holds_and_rejects():
     ident = Sims({"keys": 0.9, "wallet": 0.7, "glasses": 0.3})
     d = UltralyticsDetector(ITEMS, Settings(), FakeModel(rows), LABELS, ident)
     dets = d.detect(FRAME, 0)
-    assert [s.object_id for s in dets.sightings] == ["keys"]
+    assert [s.object for s in dets.sightings] == ["keys"]
     assert dets.held == {"wallet"}
     assert ident.crops[1] == (10, 20, 3)                         # the box crop, rows x cols
-    assert {s.object_id for s in d.detect(FRAME, 0, raw=True).sightings} == {"keys", "wallet", "glasses"}
+    assert {s.object for s in d.detect(FRAME, 0, raw=True).sightings} == {"keys", "wallet", "glasses"}
 
 
 def test_held_items_flow_into_memory(tmp_path):

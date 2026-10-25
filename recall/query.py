@@ -7,8 +7,8 @@ When the camera isn't live (heartbeat stale or missing) every answer is stamped 
     where_is(oid)      -> Answer                       (CAMERA.md §6 templates)
     history(oid)       -> [Transition]
     changes_since(t)   -> [Transition]
-    state_at(t)        -> {oid: {zone, status, container}}   replayed from the log
-    diff(t)            -> [{object_id, before, now}]
+    state_at(t)        -> {oid: {surface, status, container}}   replayed from the log
+    diff(t)            -> [{object, before, now}]
 """
 import re
 import time
@@ -16,8 +16,10 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 
 from .models import Answer, Transition
+from .places import Places
 from .store import Store
-from .zones import load_zones, zone_phrase
+from .surfaces import load_surfaces
+from .zones import load_zones
 
 
 def clock(ts) -> str:
@@ -50,6 +52,13 @@ class Query:
         self.cfg, self.items = cfg, items
         self.store = store or Store(cfg.data_dir)
 
+    def places(self) -> Places:
+        """Read fresh, only to word answers: the image zones, and the surfaces once the room is
+        registered (as live.setup_places picks them), whose prepositions then come first."""
+        registered = (self.cfg.room_dir / "camera.json").exists()
+        surfaces = load_surfaces(self.cfg.surfaces_path) if registered else []
+        return Places(load_zones(self.cfg.zones_path), surfaces)
+
     def name(self, oid) -> str:
         return self.items[oid].name if oid in self.items else oid
 
@@ -70,7 +79,7 @@ class Query:
         return stamp(a, self.as_of(now)) if stamped else a
 
     def _where_is(self, oid, now) -> Answer:
-        state, zones = self.store.load_state(), load_zones(self.cfg.zones_path)
+        state, places = self.store.load_state(), self.places()
         o = state.get(oid)
         if not o or o.last_observed is None:
             return Answer("I don't have a record of that.", "none")
@@ -80,57 +89,56 @@ class Query:
         seen = o.last_observed
 
         if o.status == "observed":
-            if o.zone:
-                text = f"Your {name} {be} {zone_phrase(zones, o.zone)} — seen {ago(seen, now)}."
+            if o.surface:
+                text = f"Your {name} {be} {places.phrase(o.surface)} — seen {ago(seen, now)}."
             else:
                 text = f"Your {name} {be} in view, but not in a named area — seen {ago(seen, now)}."
         elif o.status == "inferred" and o.container in state:
             c = state[o.container]
             if c.status == "observed":
-                where = f", {zone_phrase(zones, c.zone)}" if c.zone else ""
+                where = f", {places.phrase(c.surface)}" if c.surface else ""
                 text = (f"Your {name} {be} probably in the {c.name}{where} — inferred, "
                         f"last seen going in {ago(seen, now)}.")
             else:
                 text = (f"Your {name} {be} probably in the {c.name}, but I've lost track of the "
                         f"{c.name} too. {they} went in at {clock(seen)}.")
         else:
-            text = f"Last seen {zone_phrase(zones, o.zone)} at {clock(seen)}. I haven't seen {them} since."
-        return Answer(text, o.status, o.confidence, o.still_path)
+            text = f"Last seen {places.phrase(o.surface)} at {clock(seen)}. I haven't seen {them} since."
+        return Answer(text, o.status, o.confidence, o.photo_path)
 
     def history(self, oid) -> list[Transition]:
-        return [e for e in self.store.events() if e.object_id == oid]
+        return [e for e in self.store.events() if e.object == oid]
 
     def changes_since(self, t) -> list[Transition]:
         return [e for e in self.store.events() if e.ts >= t]
 
     def state_at(self, t) -> dict[str, dict]:
-        """Replay the log up to t. A disappeared object keeps its last-known zone (CAMERA.md §5)."""
+        """Replay the log up to t. A disappeared object keeps its last-known place (CAMERA.md §5)."""
         snap = {}
         for e in self.store.events():
             if e.ts > t:
                 break
-            zone = e.from_zone if e.kind == "disappeared" else e.to_zone
-            snap[e.object_id] = {"zone": zone, "status": e.status, "container": e.container}
+            surface = e.from_surface if e.kind == "disappeared" else e.to_surface
+            snap[e.object] = {"surface": surface, "status": e.status, "container": e.container}
         return snap
 
     def diff(self, t) -> list[dict]:
         before, now = self.state_at(t), self.state_at(float("inf"))
-        return [{"object_id": oid, "before": before.get(oid), "now": now.get(oid)}
+        return [{"object": oid, "before": before.get(oid), "now": now.get(oid)}
                 for oid in sorted(set(before) | set(now)) if before.get(oid) != now.get(oid)]
 
-    def describe(self, e: Transition, zones=None) -> str:
-        zones = load_zones(self.cfg.zones_path) if zones is None else zones
-        n, k, ph = e.name, e.kind, lambda z: zone_phrase(zones, z)
+    def describe(self, e: Transition, places: Places | None = None) -> str:
+        n, k, ph = e.name, e.kind, (places or self.places()).phrase
         cname = self.name(e.container) if e.container else None
         if k in ("appeared", "reappeared"):
-            return f"{n} {k} {ph(e.to_zone)}"
+            return f"{n} {k} {ph(e.to_surface)}"
         if k == "moved":
             via = f" (inside the {cname}, inferred)" if cname else ""
-            return f"{n} moved from {ph(e.from_zone)} to {ph(e.to_zone)}{via}"
+            return f"{n} moved from {ph(e.from_surface)} to {ph(e.to_surface)}{via}"
         if k == "inferred_contained":
             return f"{n} went into the {cname} — inferred ({e.confidence:.2f})"
         if k == "disappeared":
-            return f"{n} disappeared from {ph(e.from_zone)}"
+            return f"{n} disappeared from {ph(e.from_surface)}"
         return f"{n} {k}"
 
 

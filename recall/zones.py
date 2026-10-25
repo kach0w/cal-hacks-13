@@ -1,4 +1,5 @@
-"""Zones (DESIGN §4.1): named regions of the camera image ("kitchen counter").
+"""Zones: named boxes of the camera image ("kitchen counter") — the places until the room is
+registered and its surfaces are named (recall/surfaces.py, recall/places.py).
 
 Onboarding: detect furniture once, confirm/rename/delete, add manual boxes for anything the
 detector misses, freeze to data/zones.json.
@@ -17,8 +18,9 @@ import logging
 import time
 
 from . import config
-from .geometry import area, base_point, contains
+from .geometry import area
 from .models import Zone
+from .places import zone_at  # noqa: F401  (zones' own lookup lives with the other places)
 from .store import read_json, write_json_atomic
 
 log = logging.getLogger(__name__)
@@ -36,21 +38,6 @@ def load_zones(path) -> list[Zone]:
 
 def save_zones(zones: list[Zone], path):
     write_json_atomic(path, [z.to_dict() for z in zones])
-
-
-def zone_at(zones: list[Zone], bbox, margin=10.0) -> str | None:
-    """The zone holding the object's base point; the smallest wins (a tray on a counter)."""
-    pt = base_point(bbox)
-    inside = [z for z in zones if contains(z.box, pt, margin)]
-    return min(inside, key=lambda z: area(z.box)).name if inside else None
-
-
-def zone_phrase(zones: list[Zone], name: str | None) -> str:
-    """'on the kitchen counter' / 'in the sink'; None -> 'outside the named areas'."""
-    if name is None:
-        return "outside the named areas"
-    prep = next((z.prep for z in zones if z.name == name), "on")
-    return f"{prep} the {name}"
 
 
 def check_size(image, cfg):
@@ -100,7 +87,7 @@ def _picture(image, zones, path):
 
 
 def _ask_name(prompt, zones, default=None) -> str | None:
-    """A zone name not used yet (zone_phrase finds zones by name). ENTER = default; None = drop it."""
+    """A name not used yet (places are found by name). ENTER = default; None = drop it."""
     taken = {z.name.lower() for z in zones}
     while True:
         ans = " ".join(input(prompt).split())

@@ -1,4 +1,4 @@
-"""Perception (DESIGN §4): one pass -> boxes that already know which enrolled item they are.
+"""Perception (DESIGN §6): one pass -> boxes that already know which enrolled item they are.
 
 Identity = which enrolled label fired, one best box per item. That holds while every tracked item
 is one of a kind and visually distinct (PLAN §13: pick distinct props).
@@ -40,7 +40,7 @@ class Detector(Protocol):
 
 
 class IdentityCheck(Protocol):
-    def similarity(self, object_id: str, crop) -> float: ...   # cosine to that item's references
+    def similarity(self, object: str, crop) -> float: ...   # cosine to that item's references
 
 
 class UltralyticsDetector:
@@ -74,13 +74,13 @@ class UltralyticsDetector:
         keep, held = [], set()
         for s in dets.sightings:
             x1, y1, x2, y2 = (max(0, int(v)) for v in s.bbox)
-            sim = self.identity.similarity(s.object_id, image[y1:y2, x1:x2])
+            sim = self.identity.similarity(s.object, image[y1:y2, x1:x2])
             if sim >= self.cfg.reid_accept:
                 keep.append(s)
             elif sim >= self.cfg.reid_hold:
-                held.add(s.object_id)
+                held.add(s.object)
             else:
-                log.debug("re-id rejected %s (%.2f)", s.object_id, sim)
+                log.debug("re-id rejected %s (%.2f)", s.object, sim)
         return Detections(keep, dets.persons, held)
 
     def warmup(self, h, w):

@@ -11,6 +11,7 @@ from recall.config import Settings
 from recall.gate import ChangeGate
 from recall.memory import Memory
 from recall.models import Zone
+from recall.places import Places
 from recall.query import parse_since
 from recall.zones import zone_at
 
@@ -47,11 +48,11 @@ def test_scenario(tmp_path):
     assert k[11] == ["disappeared:keys"], k[11]
 
     st = mem.state
-    assert st["keys"].status == "unknown" and st["keys"].zone == "table"
+    assert st["keys"].status == "unknown" and st["keys"].surface == "table"
     assert st["glasses"].status == "inferred" and st["glasses"].container == "bag"
-    assert st["glasses"].zone == "kitchen counter"             # followed the bag
+    assert st["glasses"].surface == "kitchen counter"             # followed the bag
     assert st["wallet"].last_observed is None
-    assert (tmp_path / "stills").exists() and any((tmp_path / "stills").iterdir())
+    assert (tmp_path / "photos").exists() and any((tmp_path / "photos").iterdir())
 
     now = T + 12
     a = q.where_is("glasses", now=now)
@@ -62,9 +63,9 @@ def test_scenario(tmp_path):
     assert "on the kitchen counter" in q.where_is("bag", now=now).text
 
     assert len(q.changes_since(T + 6)) == 4                    # inferred, bag, glasses, keys
-    df = {x["object_id"]: x for x in q.diff(T + 0.5)}
+    df = {x["object"]: x for x in q.diff(T + 0.5)}
     assert set(df) == {"keys", "bag", "glasses"}
-    assert df["keys"]["before"]["zone"] == "kitchen counter" and df["keys"]["now"]["status"] == "unknown"
+    assert df["keys"]["before"]["surface"] == "kitchen counter" and df["keys"]["now"]["status"] == "unknown"
 
     # REPL routing
     assert "probably in the blue bag" in ask.handle("where are my glasses?", q, now).text
@@ -74,7 +75,7 @@ def test_scenario(tmp_path):
     assert ask.handle("where is my umbrella", q, now).text == "I don't have a record of that."
 
     # restart: state survives, no duplicate commits on the first look after reload
-    mem2 = Memory(ITEMS, ZONES, store, cfg)
+    mem2 = Memory(ITEMS, Places(ZONES), store, cfg)
     assert mem2.update([S("bag", BAG_COUNTER)], FRAME, T + 20) == []
 
 
