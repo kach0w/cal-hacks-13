@@ -78,7 +78,7 @@ Put a key in `.env` at the repo root (gitignored) or in the environment:
     RECALL_CARE_MODEL=claude-sonnet-5-5     # optional
 
 Then run Recall as usual (`.venv/bin/python -m recall.live --web ...`); the card is on the page,
-under the ask box. From a terminal:
+in the right-hand column under "This week" (last on a phone). From a terminal:
 
     .venv/bin/python -m recall.care "did the glasses go missing today?"
     .venv/bin/python -m recall.care --note
