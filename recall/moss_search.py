@@ -4,28 +4,38 @@ The exact-word match in ask.match_item stays first (instant, offline); this catc
 "the thing I open the door with", "my reading things", a garbled transcript. One Moss session
 index lives in memory, built from items.json at start-up: one document per way of naming an
 item (name, detector prompt, each alias, and the optional "about" line the family writes).
+A second session index holds what happened (one document per event in the memory's log, in
+the words the page shows), added to as the log grows, so search_events() can find "when did
+the glasses go into the bag?" in the history. Both indexes stay in this process: no event or
+item text is pushed to Moss's cloud.
 
     export MOSS_PROJECT_ID=... MOSS_PROJECT_KEY=...     # from portal.usemoss.dev, or put them in .env
     python -m recall.moss_search "the thing I open the front door with"
 
 No credentials, no `moss` package, or Moss down -> match() returns None and asking works as
-before. The SDK is async; it runs on a private event loop on a daemon thread, so the threaded
+before. match_info() also says how sure Moss was and how long the query took, so the page can show
+'Understood "the thing I open the front door with" as keys (Moss, 12 ms)'. The SDK is async; it runs on a private event loop on a daemon thread, so the threaded
 web server and the REPL call match() as a plain function.
 """
 import asyncio
 import logging
 import os
+import re
 import threading
+import time
 from pathlib import Path
 
 log = logging.getLogger("recall")
 
 INDEX = "recall-items"
+EVENTS_INDEX = "recall-events"
 MODEL = "moss-minilm"
 MIN_SCORE = 0.4      # tuned on real questions: our items 0.52-1.0, things we don't track <= 0.24
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"   # gitignored KEY=value lines
 TIMEOUT_S = 1.0      # a slow answer is worse than "I don't have a record of that"
 READY_WAIT_S = 10.0  # a question asked while the index is still building waits this long for it
+EVENTS_TIMEOUT_S = 3.0   # the first history search also embeds the whole log; it keeps going after this
+EVENTS_MIN_SCORE = 0.3   # not tuned on real Moss yet (only on the tests' fake)
 
 
 def read_env(path) -> dict:
@@ -53,9 +63,18 @@ def documents(items) -> list[tuple[str, str]]:
     return docs
 
 
+def wording(text) -> str:
+    """The part of a question that names the thing: 'where is the thing I open the door with?'
+    -> 'the thing I open the door with'."""
+    t = re.sub(r"\s+", " ", text).strip(" ?.!")
+    lead = r"^(?:(?:where(?:'s| is| are)?|have you seen|did you see|find|history(?: of)?)\s+)+(?:my |our )?"
+    return re.sub(lead, "", t, flags=re.I).strip() or t
+
+
 class MossSearch:
     def __init__(self, items, project_id, project_key, min_score=MIN_SCORE, client=None):
         self.items, self.min_score = items, min_score
+        self._last = (None, None)  # (text, best hit) of the last question: handle() and the page both ask
         self._loop = asyncio.new_event_loop()
         threading.Thread(target=self._loop.run_forever, daemon=True, name="moss").start()
         self._ready = asyncio.run_coroutine_threadsafe(self._build(project_id, project_key, client), self._loop)
@@ -80,6 +99,11 @@ class MossSearch:
         session = await client.session(INDEX, MODEL, auto_load_on_init=False)
         await session.add_docs([DocumentInfo(id=i, text=t) for i, t in documents(self.items)])
         log.info("moss: indexed %d item names", len(documents(self.items)))
+        self._events, self._event_ids = None, set()  # the ids: what's in the events index; only touched on the Moss thread
+        try:  # the history index is extra: without it, item matching still works
+            self._events = await client.session(EVENTS_INDEX, MODEL, auto_load_on_init=False)
+        except Exception:
+            log.warning("moss: no history index", exc_info=True)
         return session
 
     def ready(self, timeout=None) -> bool:
@@ -91,25 +115,74 @@ class MossSearch:
 
     def search(self, text, top_k=3) -> list[tuple[str, float]]:
         """[(item id, score)], best first; [] if Moss isn't ready or fails."""
+        return self._search(text, top_k)[0]
+
+    def _search(self, text, top_k):
+        """(search results, milliseconds the query itself took; None if it never ran)."""
         if not text.strip() or not self.ready(READY_WAIT_S):  # only the first question waits
-            return []
+            return [], None
 
         async def q():
             from moss import QueryOptions
             return await self._ready.result().query(text, QueryOptions(top_k=top_k))
+        t0 = time.perf_counter()
         try:
             r = asyncio.run_coroutine_threadsafe(q(), self._loop).result(TIMEOUT_S)
         except Exception:
             log.warning("moss: query failed", exc_info=True)
-            return []
-        return [(d.id.split("#")[0], d.score) for d in r.docs]
+            return [], None
+        return [(d.id.split("#")[0], d.score) for d in r.docs], (time.perf_counter() - t0) * 1000
+
+    def match_info(self, text) -> tuple[str, float, float] | None:
+        """(item id, score, query milliseconds) for the item a question means, or None when
+        nothing clears min_score."""
+        last_text, best = self._last
+        if text != last_text:
+            best, ms = self._search(text, top_k=1)
+            best = (*best[0], ms) if best else None
+            if ms is not None:  # a failed query isn't remembered: the next ask tries again
+                self._last = (text, best)
+        if best and best[1] >= self.min_score and best[0] in self.items:
+            return best
+        return None
 
     def match(self, text) -> str | None:
         """The item a question means, or None when nothing clears min_score."""
-        best = self.search(text, top_k=1)
-        if best and best[0][1] >= self.min_score and best[0][0] in self.items:
-            return best[0][0]
-        return None
+        info = self.match_info(text)
+        return info[0] if info else None
+
+    def search_events(self, text, events, describe, top_k=3):
+        """([(event, its words, score)] best first, query milliseconds) for a question about what
+        happened. events is the memory's log (Store.events()); the ones not yet in the index are
+        added first. ([], None) if Moss isn't ready, fails, or is still reading a long log."""
+        if not text.strip() or not self.ready(READY_WAIT_S) or self._events is None:
+            return [], None
+        # The same event always gets the same id (db.py's unique key), so a re-read log adds
+        # only what's new, and ids from a memory that was since started over are dropped.
+        by_id = {f"{e.ts:.3f} {e.object} {e.kind}": e for e in events}
+        words = {i: describe(e) for i, e in by_id.items()}
+
+        async def q():
+            from moss import DocumentInfo, QueryOptions
+            new = [i for i in by_id if i not in self._event_ids]
+            if new:
+                self._event_ids.update(new)  # before the await: a second search won't add them again
+                try:
+                    await self._events.add_docs([DocumentInfo(id=i, text=words[i]) for i in new])
+                except Exception:
+                    self._event_ids.difference_update(new)
+                    raise
+            t0 = time.perf_counter()
+            r = await self._events.query(text, QueryOptions(top_k=top_k + 2))
+            return r, (time.perf_counter() - t0) * 1000
+        try:
+            r, ms = asyncio.run_coroutine_threadsafe(q(), self._loop).result(EVENTS_TIMEOUT_S)
+        except Exception:
+            log.warning("moss: history search failed or is still indexing", exc_info=True)
+            return [], None
+        hits = [(by_id[d.id], words[d.id], d.score) for d in r.docs
+                if d.id in by_id and d.score >= EVENTS_MIN_SCORE]
+        return hits[:top_k], ms
 
 
 def main():
@@ -128,7 +201,8 @@ def main():
     text = " ".join(a.text)
     for oid, score in m.search(text):
         print(f"{score:.3f}  {oid}")
-    print("->", m.match(text) or "no match")
+    info = m.match_info(text)
+    print(f"-> {info[0]} ({info[2]:.1f} ms)" if info else "-> no match")
 
 
 if __name__ == "__main__":

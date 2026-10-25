@@ -35,7 +35,20 @@ def match_item(items, text) -> str | None:
 
 def find_item(q, text) -> str | None:
     """The item a question is about: exact words first, then Moss semantic search if it's on."""
-    return match_item(q.items, text) or (q.moss.match(text) if q.moss else None)
+    return find_item_info(q, text)[0]
+
+
+def find_item_info(q, text) -> tuple[str | None, dict | None]:
+    """find_item, plus how Moss understood it when Moss (not the exact words) found the item:
+    {"item", "by": "moss", "ms", "score"}; None for exact words or no match."""
+    oid = match_item(q.items, text)
+    if oid or not q.moss:
+        return oid, None
+    info = q.moss.match_info(text)
+    if not info:
+        return None, None
+    oid, score, ms = info
+    return oid, {"item": oid, "by": "moss", "ms": round(ms, 1), "score": round(score, 2)}
 
 
 def _since_arg(t):

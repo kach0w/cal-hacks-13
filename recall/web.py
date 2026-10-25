@@ -33,10 +33,10 @@ from urllib.parse import parse_qs, urlparse
 
 import cv2
 
-from .ask import find_item, handle
+from .ask import find_item_info, handle
 from .band import connect as connect_band
 from .body import Body, PoseModel, draw
-from .moss_search import MossSearch
+from .moss_search import MODEL as MOSS_MODEL, MossSearch, wording
 from .guide import SHOULDER_M, Guide, words
 from .overlay import live_view
 from .query import Query, clock
@@ -100,8 +100,9 @@ class Web:
 
         # [tts] routes
 
-        # [moss] routes
-
+        # Moss semantic search: whether it's on, and what in the history matches a question
+        self.routes["/moss"] = lambda params: self.moss_status()
+        self.routes["/moss/events"] = lambda params: self.moss_events(params.get("q", [""])[0])
 
     def _send_band(self, deg, dist):
         """Sends a turn to the band; returns the direction it was sent."""
@@ -150,11 +151,44 @@ class Web:
             a = handle(text, self.query)
         except ValueError as e:
             return {"answer": str(e), "status": "info"}
-        oid = find_item(self.query, text)
+        t = text.strip().lower()  # as handle() asks, so Moss answers both from one query
+        oid, understood = find_item_info(self.query, t)
         if oid and a.status in ("observed", "inferred", "unknown"):
             with self._lock:
                 self.guiding.update(item=oid, since=time.time(), dir=None, target=None, note=None)
-        return {"answer": a.text, "status": a.status}
+        r = {"answer": a.text, "status": a.status}
+        # Moss: when it (not the exact words) worked out the item, the page says how it understood
+        if understood and (a.status != "info" or t.startswith("history")):
+            r["understood"] = {**understood, "name": self.query.name(oid), "words": wording(text)}
+        if t.startswith("when ") and oid and self.query.moss:  # and for "when did...", that item's moment in the history
+            r["events"] = self.moss_events(text, about=oid)["matches"][:1]
+        return r
+
+    def moss_status(self) -> dict:
+        """Never waits: an index still building reads as not ready."""
+        m = self.query.moss
+        if m is None:
+            return {"on": False}
+        return {"on": True, "ready": m.ready(0), "model": MOSS_MODEL, "min_score": m.min_score}
+
+    def moss_events(self, q: str, about=None) -> dict:
+        """GET /moss/events?q=: the events in the memory's log that best match a question about
+        what happened ("when did the glasses go into the bag?"), found by Moss, best first.
+        about: only the events of that item, or of things going into it."""
+        if self.query.moss is None:
+            return {"on": False, "matches": []}
+        places = self.query.places()
+
+        def told(e):  # the log's words, without the confidence number, and never surer than the memory
+            text = self.query.describe(e, places)
+            if e.kind == "inferred_contained":
+                text = text.split(" — inferred")[0].replace(" went into ", " probably went into ", 1)
+            return text
+        hits, ms = self.query.moss.search_events(q, self.memory.store.events(), told)
+        hits = [h for h in hits if about is None or about in (h[0].object, h[0].container)]
+        return {"on": True, "ms": None if ms is None else round(ms, 1),
+                "matches": [{"t": e.ts, "time": clock(e.ts), "item": e.object, "text": text, "score": round(score, 2)}
+                            for e, text, score in hits]}
 
     def listen(self) -> dict:
         """The "Ask out loud" button: the laptop's mic hears one question, answered as ask() would, with what was
@@ -637,7 +671,8 @@ PAGE = """<!doctype html>
     .week-key { padding: 12px 18px; }
   }
 
-  /* [moss] styles */
+  /* Moss semantic search: how vague wording was understood, under the answer */
+  .understood { margin-top: 12px; color: var(--muted); font-size: .9375rem; white-space: pre-line; overflow-wrap: anywhere; }
 
 </style></head>
 <body>
@@ -776,9 +811,11 @@ PAGE = """<!doctype html>
     $("badge").textContent = LABEL[status] || "";
     $("heard").textContent = meta || "";
     $("answer").textContent = text;
+    understood(null);
   };
   const show = (r, meta) => {
     card("answer", r.answer || "Ask where something is.", meta, r.status);
+    understood(r.understood, r.events);
     say(r.answer, true);
   };
 
@@ -1031,7 +1068,18 @@ PAGE = """<!doctype html>
   }
   weekTick();
 
-  // [moss] script
+  // Moss semantic search: when Moss (not the exact words) worked out which thing was meant, one
+  // quiet line under the answer says how, so a care partner can tell if it heard wrong.
+  $("answerCard").insertAdjacentHTML("beforeend", '<p class="understood" id="understood" hidden></p>');
+  // For "when did..." questions, the moment in the history Moss found goes on the line too.
+  function understood(u, events) {
+    const el = $("understood"), ms = m => Math.max(1, Math.round(m || 0)) + " ms";
+    const lines = [];
+    if (u) lines.push(`Understood “${u.words}” as ${u.name} (Moss, ${ms(u.ms)})`);
+    if (events?.length) lines.push(`From the history: ${events[0].time}, ${events[0].text} (Moss)`);
+    el.hidden = !lines.length;
+    el.textContent = lines.join("\\n");
+  }
 
   tick(); guideTick(); camTick();
 </script>
