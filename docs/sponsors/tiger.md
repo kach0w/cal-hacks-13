@@ -46,8 +46,9 @@ key on (home, object, kind, ts) makes resends safe.
     read from `recall_events`, so the panel is never behind the camera.
   - Events that arrive late (live catching up after the wifi drops, `recall.db sync` of an old
     memory) land in days already materialized. The writer then calls
-    `refresh_continuous_aggregate` from the oldest late event, so those days are recounted right
-    away instead of on the policy's next run.
+    `refresh_continuous_aggregate` from a day before the oldest late event (TimescaleDB only
+    recounts whole days inside the window), so those days are recounted right away instead of on
+    the policy's next run.
 - **Plain Postgres still works.** No TimescaleDB: `recall_events` is a normal table, there is no
   `recall_daily`, and every query falls back to `date_trunc` over the events.
 

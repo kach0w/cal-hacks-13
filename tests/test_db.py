@@ -458,6 +458,42 @@ def test_real_daily_summary_matches_the_events_and_says_where_things_go_missing(
 
 
 @real
+def test_real_daily_counts_late_events_from_the_middle_of_an_already_counted_day(tmp_path, real_home):
+    """Live's catch-up and sync refresh from their earliest event. That event's own day must be
+    recounted too, even though the window starts partway through it."""
+    from zoneinfo import ZoneInfo
+    cfg, store, memory, query = world(tmp_path)
+    tz = db.local_tz()
+    midday = (datetime.now(ZoneInfo(tz)) - timedelta(days=2)).replace(hour=13, minute=0, second=0,
+                                                                       microsecond=0).timestamp()
+    a_week(memory, midday)
+    tables = db.Tables.connect(REAL)
+    if not tables.setup():
+        tables.close()
+        pytest.skip("plain Postgres: no recall_daily")
+    assert tables.daily_in(tz)
+    # Hold the policy so it can't recount behind the test's back (it runs as soon as it's made).
+    job = tables.conn.execute(
+        "SELECT job_id FROM timescaledb_information.jobs WHERE proc_name = 'policy_refresh_continuous_aggregate'"
+        " AND hypertable_name = 'recall_daily' AND hypertable_schema = current_schema()").fetchone()[0]
+    tables.conn.execute("SELECT alter_job(%s, scheduled => false)", (job,))
+    try:
+        # the policy has already counted every whole day up to an hour ago, before these events arrive
+        tables.conn.execute("CALL refresh_continuous_aggregate('recall_daily', NULL, %s)",
+                            (datetime.now(timezone.utc) - timedelta(hours=1),))
+        events = store.events()
+        tables.write([event_row(real_home, e) for e in events],
+                     [object_row(real_home, o) for o in memory.state.values()])
+        tables.refresh_daily(min(at(e.ts) for e in events))
+        from_events = tables.per_day(real_home, 7, tz, daily=False)
+        assert any(r["gone"] or r["moved"] for r in from_events)
+        assert tables.per_day(real_home, 7, tz) == from_events
+    finally:
+        tables.conn.execute("SELECT alter_job(%s, scheduled => true)", (job,))
+        tables.close()
+
+
+@real
 def test_real_this_week_comes_from_the_database(tmp_path, real_home):
     cfg, store, memory, query = world(tmp_path)
     store.db = Database(REAL, real_home, store.events)

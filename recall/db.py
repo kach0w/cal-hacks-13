@@ -195,10 +195,12 @@ class Tables:
     def refresh_daily(self, since: datetime):
         """Recounts recall_daily's whole days from since. Events that arrive late (a catch-up after
         an outage, a sync) land in days it has already counted, which it would otherwise show
-        unchanged until its policy's next run; today's events never need this (real-time)."""
+        unchanged until its policy's next run; today's events never need this (real-time).
+        TimescaleDB only recounts days wholly inside the window, so it starts a day before since:
+        that covers the start of since's local day in any time zone."""
         try:
             self.conn.execute("CALL refresh_continuous_aggregate('recall_daily', %s, %s)",
-                              (since, datetime.now(timezone.utc) - timedelta(hours=1)))
+                              (since - timedelta(days=1), datetime.now(timezone.utc) - timedelta(hours=1)))
         except Exception as e:  # no recall_daily, or nothing whole to recount
             log.debug("database: recall_daily not refreshed (%s)", str(e).splitlines()[0])
 
