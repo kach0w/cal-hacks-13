@@ -3,6 +3,7 @@
     python -m recall.live                       # camera 0
     python -m recall.live --show                # + overlay window (q quits)
     python -m recall.live --web                 # + web page: board, ask box, guidance
+    python -m recall.live --voice               # + ask out loud here (Enter); starts the web page too
     python -m recall.live --src demo.mp4 --show # replay a recording into data/replay/
     python -m recall.live --src demo.mp4 --show --set REPLAY_SPEED=1    # watch it in real time
     python -m recall.live --src demo.mp4 --snapshots data/shots         # every pass as a jpg
@@ -16,6 +17,7 @@ and never touch the live memory (ask about it with: python -m recall.ask --repla
 import argparse
 import logging
 import signal
+import threading
 from pathlib import Path
 
 from . import config
@@ -116,10 +118,11 @@ def show_window(pipeline, source, memory, room=None):
 
 
 def run(cfg, items, places, source, detector, store, room=None, show=False, snapshots=None,
-        web=False, band=None) -> Pipeline:
+        web=False, band=None, voice=False) -> Pipeline:
     """Memory + the detection thread on `source`; blocks until the video ends, q, or Ctrl-C.
     room: the registered room (xyz + surfaces), or None. snapshots: a folder that gets the
-    overlay of every detection pass (no window needed)."""
+    overlay of every detection pass (no window needed). voice (needs web): spoken questions on
+    this terminal go through the web page's ask, so they start guidance too."""
     query = Query(cfg, items, store)
 
     def on_event(t):
@@ -145,7 +148,14 @@ def run(cfg, items, places, source, detector, store, room=None, show=False, snap
         pipeline.start()
         if web:
             from .web import Web
-            print(f"Recall web page: {Web(cfg, items, memory, pipeline, places, room, band).start()}")
+            page = Web(cfg, items, memory, pipeline, places, room, band)
+            print(f"Recall web page: {page.start()}")
+            if voice:  # the terminal shares the 🎤 button's mic and Whisper; its loop readies them
+                from .voice import loop
+                threading.Thread(target=loop, args=(lambda text: page.ask(text)["answer"], page.mic, page.stt),
+                                 daemon=True, name="voice").start()
+            else:
+                threading.Thread(target=page.warm_voice, daemon=True, name="voice").start()
         if show:
             show_window(pipeline, source, memory, room)
         else:
@@ -173,6 +183,7 @@ def main(argv=None):
     ap.add_argument("--show", action="store_true", help="overlay window (q quits)")
     ap.add_argument("--web", action="store_true", help="web page: board, ask box, left/right guidance")
     ap.add_argument("--band", metavar="HOST", help="with --web: also point the necklace, e.g. recall-band.local")
+    ap.add_argument("--voice", action="store_true", help="ask out loud on this terminal (Enter); implies --web")
     ap.add_argument("--snapshots", type=Path, metavar="DIR", help="save the overlay of every detection pass")
     config.add_args(ap)
     a = ap.parse_args(argv)
@@ -196,7 +207,8 @@ def main(argv=None):
     if not source.live:
         store.clear()
         log.info("replaying %s into %s", cfg.src, store.root)
-    if run(cfg, items, places, source, detector, store, room, a.show, a.snapshots, a.web, a.band).crashed:
+    if run(cfg, items, places, source, detector, store, room, a.show, a.snapshots, a.web or a.voice, a.band,
+           a.voice).crashed:
         raise SystemExit(1)
 
 

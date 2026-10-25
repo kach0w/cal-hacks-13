@@ -9,10 +9,12 @@ Runs inside live (it needs the newest frame and the memory), on its own threads:
     them at the item, or at its container when the memory says it went into one. With the room
     registered this happens in the scanned room (recall/body.py), else in the picture (guide.py).
 
-The 🎤 button asks out loud (browser speech-to-text) and the answer is spoken back; with
-MOSS_PROJECT_ID/MOSS_PROJECT_KEY set, Moss resolves vague wording to an item (moss_search.py).
+The 🎤 button asks out loud through the laptop's mic (recall/voice.py: Whisper on the laptop), so it
+works from any device on the wifi; press it again to stop listening sooner. The answer is spoken
+back by the page. With MOSS_PROJECT_ID/MOSS_PROJECT_KEY set, Moss resolves vague wording to an item
+(moss_search.py).
 
-Routes: /  /state  /ask?q=  /guide  /cam.jpg  /photo/<path>
+Routes: /  /state  /ask?q=  /listen  /listen?stop=1  /guide  /cam.jpg  /photo/<path>
 
 With --band, every guidance update also goes to the necklace (firmware/band) as a UDP
 packet "dir,dist": dir in degrees, + = to the person's right; dist 0..100. The servo reaches
@@ -36,6 +38,7 @@ from .moss_search import MossSearch
 from .guide import SHOULDER_M, Guide, words
 from .overlay import live_view
 from .query import Query, clock
+from .voice import Mic, Transcriber
 
 log = logging.getLogger("recall")
 
@@ -78,6 +81,9 @@ class Web:
         self.band_side = 0  # band_dir's side, 0 before anything is sent
         self._waving = False  # which end of the wave the last packet past the servo's reach was
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.mic, self.stt = Mic(), Transcriber(items)  # the 🎤 button's; warm_voice() readies them
+        self._listening = threading.Lock()  # one question at a time from the page
+        self._stop_listening = threading.Event()
 
     def _find_band(self):
         """Looks the band up until it answers: it may join the wifi after we start."""
@@ -148,6 +154,40 @@ class Web:
             with self._lock:
                 self.guiding.update(item=oid, since=time.time(), dir=None, target=None, note=None)
         return {"answer": a.text, "status": a.status, "photo": a.photo_path}
+
+    def listen(self) -> dict:
+        """The 🎤 button: the laptop's mic hears one question, answered as ask() would, with what was
+        heard. A second press while it's listening gets {"busy": true}."""
+        if not self._listening.acquire(blocking=False):
+            return {"busy": True}
+        try:
+            self._stop_listening.clear()
+            audio = self.mic.listen(stop=self._stop_listening.is_set)
+            heard = self.stt(audio) if audio is not None else None
+        except Exception as e:  # no mic, no permission, no Whisper: say so on the page
+            log.warning("voice: %s", e)
+            return {"heard": None, "answer": "The laptop's microphone isn't working.", "status": "info",
+                    "photo": None}
+        finally:
+            self._listening.release()
+        if not heard:
+            return {"heard": None, "status": "info", "photo": None,
+                    "answer": "Sorry, I didn't catch that." if audio is not None
+                    else "I didn't hear anything. Speak toward the laptop."}
+        log.info("voice: heard %r", heard)
+        return {"heard": heard, **self.ask(heard)}
+
+    def stop_listening(self):
+        self._stop_listening.set()
+
+    def warm_voice(self):
+        """Open the mic and load Whisper before the first press: that question is then as quick as
+        the rest, and the mic already knows how loud the room is (voice.Mic)."""
+        try:
+            self.mic.open()
+            self.stt.load()
+        except Exception as e:
+            log.warning("voice: the 🎤 button won't work (%s)", e)
 
     def guidance(self) -> dict:
         with self._lock:
@@ -297,6 +337,12 @@ class Web:
                     self._json(web.state())
                 elif url.path == "/ask":
                     self._json(web.ask(parse_qs(url.query).get("q", [""])[0]))
+                elif url.path == "/listen":
+                    if parse_qs(url.query).get("stop"):
+                        web.stop_listening()
+                        self._json({"ok": True})
+                    else:
+                        self._json(web.listen())
                 elif url.path == "/guide":
                     self._json(web.guidance())
                 elif url.path == "/cam.jpg":
@@ -390,7 +436,7 @@ PAGE = """<!doctype html>
   <h1>Recall</h1>
   <div class="top">
     <section>
-      <form id="ask"><input id="q" placeholder="Where are my keys?" autocomplete="off"><button type="button" id="mic" hidden title="Ask out loud">🎤</button><button>Ask</button></form>
+      <form id="ask"><input id="q" placeholder="Where are my keys?" autocomplete="off"><button type="button" id="mic" title="Ask out loud (the laptop listens)">🎤</button></form>
       <p id="answer"></p>
       <img id="photo" hidden alt="Where it was last seen">
       <div id="guide" hidden>
@@ -410,31 +456,39 @@ PAGE = """<!doctype html>
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const say = text => { speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance(text)); };
 
-  $("ask").onsubmit = async e => {
-    e?.preventDefault();
-    const r = await (await fetch("/ask?q=" + encodeURIComponent($("q").value))).json();
+  const show = r => {
     $("answer").textContent = r.answer;
     $("photo").hidden = !r.photo;
     if (r.photo) $("photo").src = "/photo/" + encodeURIComponent(r.photo);
     say(r.answer);
   };
 
-  // Ask out loud: the browser's speech-to-text (Chrome, Safari; needs localhost or https), then
-  // the same /ask as typing. Moss on the server works out which item vague wording means.
-  const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (Rec) {
-    const rec = new Rec();
-    rec.lang = "en-US"; rec.interimResults = true;
-    $("mic").hidden = false;
-    $("mic").onclick = () => { speechSynthesis.cancel(); rec.start(); };
-    rec.onstart = () => { $("mic").classList.add("on"); $("q").value = ""; $("q").placeholder = "Listening…"; };
-    rec.onresult = e => {
-      const r = e.results[e.results.length - 1];
-      $("q").value = r[0].transcript;
-      if (r.isFinal) $("ask").onsubmit();
-    };
-    rec.onend = () => { $("mic").classList.remove("on"); $("q").placeholder = "Where are my keys?"; };
-  }
+  $("ask").onsubmit = async e => {
+    e?.preventDefault();
+    show(await (await fetch("/ask?q=" + encodeURIComponent($("q").value))).json());
+  };
+
+  // Ask out loud: the laptop's mic listens until you stop talking (Whisper on the laptop,
+  // recall/voice.py), so this works from a phone too; press again to stop sooner. Moss on the
+  // server works out which item vague wording means.
+  let listening = false;
+  $("mic").onclick = async () => {
+    if (listening) return fetch("/listen?stop=1");
+    listening = true;
+    speechSynthesis.cancel();
+    $("mic").classList.add("on"); $("q").value = ""; $("q").placeholder = "Listening… ask the laptop";
+    try {
+      const r = await (await fetch("/listen")).json();
+      if (r.busy) { $("answer").textContent = "The laptop is already listening."; return; }
+      $("q").value = r.heard || "";
+      show(r);
+    } catch (e) {
+      $("answer").textContent = "Couldn't reach the laptop.";
+    } finally {
+      listening = false;
+      $("mic").classList.remove("on"); $("q").placeholder = "Where are my keys?";
+    }
+  };
 
   async function tick() {
     try {

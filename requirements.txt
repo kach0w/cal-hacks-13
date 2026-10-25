@@ -7,6 +7,8 @@ open3d==0.19.0             # Part E: ray-casting the room mesh. 0.20 needs brew 
 trimesh                    # Part E: reading room.glb the way the setup tools do
 pytest
 moss                       # Moss semantic search: which item a vague question means (optional at runtime)
+sounddevice                # recall.voice: the laptop mic
+faster-whisper             # recall.voice: speech to text on the laptop (Whisper, plus the Silero VAD it ships)
 # Task 4 (HTTP):
 fastapi
 uvicorn
