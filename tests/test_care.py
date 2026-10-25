@@ -168,6 +168,26 @@ def test_model_from_env(tmp_path, monkeypatch):
     assert Care(query, store, client=FakeClient()).model == "claude-haiku-5-5"
 
 
+def test_one_question_keeps_to_its_budget(tmp_path, monkeypatch):
+    query, store, _ = scene(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-real")
+    c = Care(query, store)  # builds the real SDK client; nothing is sent
+    assert c.on and c.client.max_retries == 0  # a retry would get the whole timeout again
+
+
+def test_everything_now_does_not_search_by_id(tmp_path):
+    query, store, _ = scene(tmp_path)
+
+    class NoMoss:
+        def match(self, text):
+            raise AssertionError("everything_now should use the ids it already has")
+
+    from recall.models import Item
+    query.items["tv_remote"] = Item(id="tv_remote", name="clicker", prompt="tv remote")  # id not in its words
+    query.moss = NoMoss()
+    now = Care(query, store, client=FakeClient()).everything_now()
+    assert "- keys:" in now and "- clicker: No record" in now
+
 def test_care_routes_over_http(tmp_path):
     query, store, memory = scene(tmp_path)
 

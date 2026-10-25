@@ -72,7 +72,9 @@ class Care:
         except ImportError:
             log.warning("care: the anthropic package isn't installed; 'Ask about the day' is off")
             return None
-        return anthropic.Anthropic(api_key=key, timeout=self.timeout, max_retries=1)
+        # No SDK retries: each retry gets the full per-request timeout again, which would break the
+        # 25 s budget for the whole question. The page has a "try again" path instead.
+        return anthropic.Anthropic(api_key=key, timeout=self.timeout, max_retries=0)
 
     @property
     def on(self) -> bool:
@@ -189,6 +191,8 @@ class Care:
             return str(e), f"{name} (failed)", True
 
     def _oid(self, item: str):
+        if item in self.query.items:  # already an id (everything_now): no need to ask Moss
+            return item
         return find_item(self.query, item or "")
 
     def _not_tracked(self, item):
