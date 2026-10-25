@@ -25,7 +25,7 @@ const bool SERVO_REVERSED = true;   // SG90 angle grows counterclockwise from ab
 // FORWARD: servo angle where the arrow points straight out from the chest.
 // REST: where the arrow sits when idle or lost. Set both to match how the servo is mounted.
 const int FORWARD = 90;
-const int REST = 90;
+const int REST = 120;
 const unsigned long TIMEOUT_MS = 1000;     // no packet this long -> centre
 const float SMOOTH = 0.35;                 // 0..1, higher = snappier, jitterier
 const int DEADBAND_DEG = 3;                // ignore moves smaller than this
