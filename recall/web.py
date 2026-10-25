@@ -216,17 +216,24 @@ class Web:
         if self.pose is None:
             self.pose, self.body = PoseModel(), Body(self.room, self.cfg.shoulder_height_m, self.cfg.guide_smooth)
         person = self.pose.largest(image)
-        if person is None or not self.body.update(*person):
+        seen = person is not None and self.body.update(*person)
+        if not seen:
             self._hold()
-            cv2.putText(shown, "looking for you", (16, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 200, 255), 2)
-            return
+            log.debug("guide: lost this look: %s", "nobody found" if person is None else self.body.lost)
+            if self.body.pos is None:
+                cv2.putText(shown, "looking for you", (16, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 200, 255), 2)
+                return
         deg, dist, metres = self.body.turn(xyz)
-        with self._lock:
-            self.guiding.update(dir=deg, dist=dist, metres=metres, target=target_name, t=time.time())
-        sent = self._send_band(deg, dist)
-        log.debug("guide: at (%.2f, %.2f) facing %+4.0f (%s; nose %.2f eye %.2f)  turn %+4.0f  band %+4.0f  %.1f m",
-                  *self.body.pos, math.degrees(self.body.yaw), self.body.why, *self.body.face, deg, sent, metres)
-        draw(shown, self.room, self.body, xyz, f"{target_name}: {words(deg, dist)}", deg, metres)
+        title = f"{target_name}: {words(deg, dist)}"
+        if seen:
+            with self._lock:
+                self.guiding.update(dir=deg, dist=dist, metres=metres, target=target_name, t=time.time())
+            sent = self._send_band(deg, dist)
+            log.debug("guide: at (%.2f, %.2f) facing %+4.0f (%s; nose %.2f eye %.2f)  turn %+4.0f  band %+4.0f  %.1f m",
+                      *self.body.pos, math.degrees(self.body.yaw), self.body.why, *self.body.face, deg, sent, metres)
+        else:  # keep showing the last estimate rather than nothing
+            title += f"  (seen {time.monotonic() - self.body.seen_at:.1f} s ago)"
+        draw(shown, self.room, self.body, xyz, title, deg, metres)
 
     def _point(self, oid, image, shown):
         if self.room is not None:

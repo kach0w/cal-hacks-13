@@ -158,3 +158,11 @@ def test_no_shoulders_means_lost(room):
     conf[[B.L_SHOULDER, B.R_SHOULDER]] = 0.1
     assert not body.update(kp, conf)
     assert (body.pos == pos).all()
+
+
+def test_the_arrow_is_in_the_picture_near_the_camera(room):
+    """At (0, 3.5) the floor under the person is below the picture; the arrow at their shoulders isn't."""
+    body = seen(room, SPOTS[-1], 30)
+    img = np.zeros((room.height, room.width, 3), np.uint8)
+    B.draw(img, room, body, [2.0, 0.45, 2.0], "test", 0.0, 1.0)
+    assert (img == B.GREEN).all(axis=2).sum() > 100

@@ -144,3 +144,26 @@ def test_band_waves_when_the_item_is_past_its_reach(tmp_path):
     web, _ = make(tmp_path)
     sent = [web._send_band(deg, 50) for deg in (60, 120, 120, 170, -175, -100, -40)]
     assert sent == [60, 90, 60, 90, 60, -90, -40]  # -175 kept to the right; -100 is clearly left
+
+
+def test_room_guidance_keeps_showing_the_last_estimate(tmp_path):
+    """A look that misses the person (nobody found, a hidden shoulder) keeps the last arrow up."""
+    import json
+    import time
+    from pathlib import Path
+
+    import numpy as np
+
+    from recall.body import GREEN, Body
+    from recall.room import Room
+    web, memory = make(tmp_path)
+    for t in (1, 2, 3):
+        memory.update([S("keys", KEYS_TABLE)], FRAME, t)
+    memory.state["keys"].xyz = [2.5, 0.45, 2.0]
+    web.room = Room(json.loads((Path(__file__).resolve().parent.parent / "data/room/camera.json").read_text()))
+    web.pose = type("NobodyInView", (), {"largest": lambda self, image: None})()
+    web.body = Body(web.room)
+    web.body.pos, web.body.yaw, web.body.seen_at = np.array([2.0, 1.5]), 0.0, time.monotonic()
+    shown = np.zeros((720, 1280, 3), np.uint8)
+    web._point_in_room("keys", shown, shown)
+    assert (shown == GREEN).all(axis=2).sum() > 100

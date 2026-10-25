@@ -63,6 +63,7 @@ class Body:
         self.pos = self.yaw = None
         self.why = ""           # what decided the facing, for the overlay and the log
         self.face = (0.0, 0.0)  # the last look's nose and best eye confidence, for the log
+        self.lost = ""          # why the last failed look failed, for the log
         self.seen_at = 0.0
 
     @property
@@ -78,10 +79,12 @@ class Body:
         """One person's COCO keypoints (pixels) and confidences -> position and facing. False, with
         nothing changed, when their shoulders can't be placed. now: seconds (default: the clock)."""
         if conf[L_SHOULDER] < SHOULDER_CONF or conf[R_SHOULDER] < SHOULDER_CONF:
+            self.lost = f"shoulder confidence {conf[L_SHOULDER]:.2f} / {conf[R_SHOULDER]:.2f}"
             return False
         left, right = self.room.plane_hit(np.asarray(kp)[[L_SHOULDER, R_SHOULDER]], self.shoulder_m)[:, [0, 2]]
         width = np.linalg.norm(right - left)
         if not WIDTH_M[0] <= width <= WIDTH_M[1]:  # NaN (a ray above the shoulders' height) fails too
+            self.lost = f"shoulders {width:.2f} m apart"
             return False
         pos, r = (left + right) / 2, (right - left) / width
         forward = np.array([r[1], -r[0]])  # up × right
@@ -115,9 +118,10 @@ class Body:
 
 
 def draw(img, room, body, target, title, deg, metres):
-    """The guidance on the camera picture: a ring on the floor under the person, their facing as an
-    arrow on the floor, a line to the target, and the numbers. If the arrow on the floor points
-    where their chest points, the facing is right."""
+    """The guidance on the camera picture: a ring round the person at shoulder height, their facing
+    as an arrow out of their chest, a line to the target, and the numbers. If the arrow points
+    where their chest points, the facing is right. Drawn at the shoulders, not the floor: near the
+    camera the floor under them is below the picture, and the shoulders are in it whenever they're seen."""
     import cv2
     from .room import project
 
@@ -127,16 +131,16 @@ def draw(img, room, body, target, title, deg, metres):
             return None
         return [tuple(int(c) for c in p) for p in project(pts, room.K, room.dist, room.R, room.t).round()]
 
-    x, z = body.pos
+    (x, z), y = body.pos, body.shoulder_m
     a = np.linspace(0, 2 * math.pi, 33)
-    ring = pixels(np.c_[x + RING_M * np.sin(a), np.zeros_like(a), z + RING_M * np.cos(a)])
+    ring = pixels(np.c_[x + RING_M * np.sin(a), np.full_like(a, y), z + RING_M * np.cos(a)])
     if ring:
         cv2.polylines(img, [np.array(ring, np.int32)], True, GREEN, 2)
     f = body.forward
-    arrow = pixels([[x, 0, z], [x + ARROW_M * f[0], 0, z + ARROW_M * f[1]]])
+    arrow = pixels([[x, y, z], [x + ARROW_M * f[0], y, z + ARROW_M * f[1]]])
     if arrow:
         cv2.arrowedLine(img, arrow[0], arrow[1], GREEN, 3, tipLength=0.25)
-    line = pixels([[x, 0, z], target])
+    line = pixels([[x, y, z], target])
     if line:
         cv2.line(img, line[0], line[1], ORANGE, 2)
         cv2.circle(img, line[1], 10, ORANGE, 2)
