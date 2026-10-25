@@ -285,3 +285,23 @@ def test_the_page_sees_the_band_button_listening(tmp_path):
     web.stop_listening()
     pressed.join(5)
     assert web.guidance()["listening"] is False
+
+
+def test_guidance_json_survives_numpy_numbers(tmp_path):
+    """Under NumPy 2, float / np.float32 stays float32; json.dumps rejected it and /guide went empty."""
+    import numpy as np
+    from recall.guide import Guide
+    g = Guide.__new__(Guide)  # skip loading the pose model
+    g.body, g.full_px = np.array([400.0, 300.0]), np.float32(120.0)
+    assert type(g.metres((520.0, 300.0))) is float
+
+    web, memory = make(tmp_path)
+    for t in (1, 2, 3):
+        memory.update([S("keys", KEYS_TABLE)], FRAME, t)
+    web.ask("where are my keys")
+    with web._lock:
+        web.guiding.update(dir=np.float32(-37.6), dist=40, metres=np.float32(1.234), t=time.time())
+    out = web.guidance()
+    json.dumps(out)
+    assert out["dir"] == -38 and type(out["dir"]) is int
+    assert out["metres"] == 1.2 and type(out["metres"]) is float

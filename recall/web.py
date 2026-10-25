@@ -244,9 +244,9 @@ class Web:
         live = g["item"] and g["dir"] is not None and time.time() - g["t"] < 1
         name = self.items[g["item"]].name if g["item"] else None
         return {"item": name, "target": g["target"],
-                "dir": round(g["dir"]) if live else None,
+                "dir": int(round(float(g["dir"]))) if live else None,  # plain Python numbers: json can't write numpy
                 "words": words(g["dir"], g["dist"]) if live else g["note"],
-                "metres": round(g["metres"], 1) if live and g["metres"] is not None else None,
+                "metres": round(float(g["metres"]), 1) if live and g["metres"] is not None else None,
                 "listening": self._listening.locked()}  # the laptop mic is hearing a question, from any press
 
     # --- guidance thread -----------------------------------------------------------------

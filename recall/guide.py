@@ -114,7 +114,8 @@ class Guide:
         """Rough distance to target in metres, measured in shoulder widths. Ignores depth."""
         if self.body is None or not self.full_px:
             return None
-        return float(np.linalg.norm(np.asarray(target) - self.body)) / self.full_px * SHOULDER_M
+        # float() at the end: full_px can be numpy.float32, which json can't write (NumPy 2 keeps the float32)
+        return float(np.linalg.norm(np.asarray(target) - self.body) / self.full_px * SHOULDER_M)
 
     def facing_degrees(self):
         """Which way they face in the picture's floor map: 0 = at the camera, +90 = picture-right."""
