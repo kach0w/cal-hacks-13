@@ -101,7 +101,7 @@ against the live API, see the last section.)
 
 ## What was verified, and how
 
-- **Fakes (automated, `tests/test_care.py`, 10 tests):** a fake client whose `messages.create`
+- **Fakes (automated, `tests/test_care.py`, 12 tests plus 1 live test that skips without a key):** a fake client whose `messages.create`
   returns `tool_use` then `end_turn`: the right tools run and their facts reach Claude; tool results
   never contain photo paths; status "off" without a key; plain errors on API failure; the overall
   timeout stops the loop; too many turns and refusals; the summary fallback; `/care` and

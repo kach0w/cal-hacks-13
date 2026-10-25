@@ -1,5 +1,8 @@
 # Cal Hacks 13.0 sponsor tracks (for Recall)
 
+> Researched at ~5:00 AM PDT, before the integrations were built. Notes here about what Recall "currently" has
+> (for example "zero Claude usage") describe that moment. What was built afterwards is in [final_report.md](final_report.md).
+
 Compiled 2026-10-25 ~5:00 AM PDT from `/tmp/recall-research/out/research.json` (46 researched tracks plus general findings)
 and the official track list on Devpost, https://cal-hacks-13-0.devpost.com/ (saved as `/tmp/recall-research/hack-home.txt`).
 The live site is Hive, https://hive.hackberkeley.org/prizes. Its data comes from https://hive.hackberkeley.org/api/live/prizes.

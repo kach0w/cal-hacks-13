@@ -6,6 +6,14 @@
 
 Scope: this ledger covers paid third-party APIs and services for Recall. **The agents' own model usage (Claude Code sessions doing the research and builds) is not metered in this ledger.**
 
+## Actuals (as of 5:50 AM PDT, Oct 25)
+
+| Item | Spent | Notes |
+|---|---|---|
+| Research, builds, reviews, QA | $0 | No paid API was called: no keys existed on the build machine. Tests used fakes and local Docker TimescaleDB/Postgres containers |
+| Packages installed | $0 | anthropic 2.3.0, cartesia 4.2.0, moss 1.21.0, psycopg 3.3 (open source) |
+| **Total spent** | **$0 of $200** | Remaining: $200. Outstanding commitments: none |
+
 ## Ledger (as of ~5:00 AM PDT, Oct 25)
 
 | Item | Spent | Notes |
