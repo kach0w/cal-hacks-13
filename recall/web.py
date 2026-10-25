@@ -688,14 +688,16 @@ PAGE = """<!doctype html>
   let answering = 0;
   let voiceOff = false;  // the laptop has no Cartesia voice: stop asking
   let playing = null, turn = 0;
-  const browserCancel = speechSynthesis.cancel.bind(speechSynthesis);
-  speechSynthesis.cancel = () => {  // so the mic button's cancel silences this voice too
+  const synth = window.speechSynthesis;  // missing in some in-app browsers: the page must still load
+  const browserCancel = synth ? synth.cancel.bind(synth) : () => {};
+  const hush = () => {
     turn++; answering = 0;
     if (playing) { playing.pause(); playing = null; }
     browserCancel();
   };
+  if (synth) synth.cancel = hush;  // so the mic button's cancel silences this voice too
   const say = (text, isAnswer) => {
-    speechSynthesis.cancel();
+    hush();
     if (!text) return;
     const mine = ++turn;
     let done = () => {};
@@ -705,6 +707,7 @@ PAGE = """<!doctype html>
     }
     const browser = () => {
       if (mine !== turn) return;
+      if (!synth) return done();
       const u = new SpeechSynthesisUtterance(text);
       u.onend = u.onerror = done;
       speechSynthesis.speak(u);
