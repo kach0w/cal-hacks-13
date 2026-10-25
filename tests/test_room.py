@@ -1,4 +1,5 @@
-"""recall/room.py, the runtime half of handoffAB.md, on Person A's real scan (data/room/) with a known
+"""recall/room.py, the runtime half of handoffAB.md, on a real scan (a frozen copy in tests/fixtures/room/,
+so rescanning data/room/ doesn't move what these check) with a known
 camera pose, checked against the setup tools' own geometry (tools/roomlib.py)."""
 import json
 import logging
@@ -15,7 +16,7 @@ from recall.room import CV_TO_GL, Room, gl_to_opencv, opencv_to_gl, read_mesh
 sys.path.insert(0, str(ROOT / "tools"))
 import roomlib  # noqa: E402  (their tools import each other as scripts)
 
-REAL = ROOT / "data" / "room"
+REAL = ROOT / "tests" / "fixtures" / "room"  # the first real scan, frozen
 K = np.array([[900.0, 0, 640], [0, 900, 360], [0, 0, 1]])
 DIST = np.array([-0.05, 0.02, 0.0, 0.0, 0.0])
 

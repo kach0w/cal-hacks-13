@@ -70,12 +70,13 @@ def orthonormalize(M):
     return U @ Vt
 
 
-def floor_points(origin, dirs):
-    """Ray ∩ plane y = 0 per ray; NaN where the ray doesn't reach the floor in front of the camera."""
+def floor_points(origin, dirs, y=0.0):
+    """Ray ∩ plane at height y (the floor by default) per ray; NaN where the ray doesn't reach it in
+    front of the camera."""
     with np.errstate(divide="ignore", invalid="ignore"):
-        s = -origin[1] / dirs[:, 1]
+        s = (y - origin[1]) / dirs[:, 1]
     p = origin + s[:, None] * dirs
-    p[:, 1] = 0.0
+    p[:, 1] = y
     p[~(np.isfinite(s) & (s > 0))] = np.nan
     return p
 
@@ -228,6 +229,12 @@ class Room:
     def floor_hit(self, u: float, v: float) -> tuple[float, float, float] | None:
         """Ray through pixel (u, v) ∩ floor plane y = 0 (exact), or None if it misses in front."""
         return _point(floor_points(*pixel_rays([[u, v]], self.K, self.dist, self.R, self.t))[0])
+
+    def plane_hit(self, uv, y: float) -> np.ndarray:
+        """Rays through pixels uv (N, 2) ∩ the level plane at height y: (N, 3), NaN rows where a ray
+        doesn't reach it in front of the camera. A point at a known height (an ankle, a shoulder) is
+        where its pixel's ray crosses that height."""
+        return floor_points(*pixel_rays(uv, self.K, self.dist, self.R, self.t), y)
 
     def world_to_pixel(self, x: float, y: float, z: float) -> tuple[float, float]:
         """World point -> pixel through the lens, for overlays (doesn't check the point is in front)."""

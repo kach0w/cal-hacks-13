@@ -3,7 +3,7 @@
 ultralytics>=8.4           # YOLO-World + YOLOE (yoloe-26 needs 8.4)
 opencv-python>=4.9         # ArUco is in core since 4.7 — don't also install opencv-contrib-python
 numpy
-open3d>=0.18               # Part E: ray-casting the room mesh
+open3d==0.19.0             # Part E: ray-casting the room mesh. 0.20 needs brew install libusb on Apple silicon
 trimesh                    # Part E: reading room.glb the way the setup tools do
 pytest
 moss                       # Moss semantic search: which item a vague question means (optional at runtime)
