@@ -137,9 +137,9 @@ class Query:
             via = f" (inside the {cname}, inferred)" if cname else ""
             return f"{n} moved from {ph(e.from_surface)} to {ph(e.to_surface)}{via}"
         if k == "inferred_contained":
-            return f"{n} went into the {cname} — inferred ({e.confidence:.2f})"
+            return f"{n} went into the {cname} (inferred, {e.confidence:.2f})"
         if k == "disappeared":
-            return f"{n} disappeared from {ph(e.from_surface)}"
+            return f"{n} disappeared from " + (f"the {e.from_surface}" if e.from_surface else ph(None))
         return f"{n} {k}"
 
 

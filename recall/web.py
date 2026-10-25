@@ -184,7 +184,7 @@ class Web:
         def told(e):  # the log's words, without the confidence number, and never surer than the memory
             text = self.query.describe(e, places)
             if e.kind == "inferred_contained":
-                text = text.split(" — inferred")[0].replace(" went into ", " probably went into ", 1)
+                text = text.split(" (inferred")[0].replace(" went into ", " probably went into ", 1)
             return text
         hits, ms = self.query.moss.search_events(q, self.memory.store.events(), told)
         hits = [h for h in hits if about is None or about in (h[0].object, h[0].container)]
@@ -632,6 +632,9 @@ PAGE = """<!doctype html>
   }
   /* [care] Ask about the day (Claude, for family) */
   .care { padding: 18px 20px 20px; }
+  #careForm { flex-wrap: wrap; }
+  #careForm input { flex-basis: 100%; }
+  #careForm button { flex: 1; }
   .care form input { height: 48px; font-size: 1rem; }
   .care form button { min-height: 48px; }
   .care button:disabled { opacity: .6; cursor: default; }
@@ -645,7 +648,7 @@ PAGE = """<!doctype html>
   @media (max-width: 640px) { .care { padding: 16px; } }
 
   /* [week] Tiger Data: this week's grid */
-  .week-scroll { overflow-x: auto; padding: 14px 22px 4px; }
+  .week-scroll { position: relative; overflow-x: auto; padding: 14px 22px 4px; }
   .week-scroll:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; border-radius: var(--r-l); }
   .week-grid { border-collapse: separate; border-spacing: 4px; margin: 0 -4px; width: calc(100% + 8px); min-width: 25rem; table-layout: fixed; }
   .week-grid th { font-weight: 600; text-align: left; overflow-wrap: anywhere; }
@@ -771,7 +774,7 @@ PAGE = """<!doctype html>
         <form id="careForm">
           <label for="careQ" class="vh">Ask Claude about the day</label>
           <input id="careQ" placeholder="Lost anything today?" autocomplete="off" enterkeyhint="go">
-          <button type="submit" class="primary" id="careAsk">Ask</button>
+          <button type="submit" class="primary" id="careAsk">Ask Claude</button>
           <button type="button" class="secondary" id="careNote">Today's note</button>
         </form>
         <div class="care-out" id="careOut" data-state="empty" aria-live="polite" hidden>
@@ -881,7 +884,7 @@ PAGE = """<!doctype html>
   $("mic").onclick = async () => {
     if (listening || laptopListening) { try { await fetch("/listen?stop=1"); } catch (e) {} return; }
     listening = true;
-    speechSynthesis.cancel();
+    if (window.speechSynthesis) speechSynthesis.cancel();
     setListening(true); $("q").value = "";
     card("listening", "Listening. Ask your question toward the laptop.", "Press Stop when you're done.");
     try {
@@ -999,8 +1002,9 @@ PAGE = """<!doctype html>
           ? `Guiding you to <b>the ${esc(g.target)}</b>. Your ${esc(g.item)} ${/s$/.test(g.item) ? "are" : "is"} in it.`
           : `Guiding you to <b>your ${esc(g.item)}</b>`;
         $("guide").classList.toggle("lost", lost);
-        $("guideWords").textContent = g.words ?? "Step in front of the camera";
-        $("guideMath").textContent = lost ? "I can't see you right now."
+        // A paused camera can't see anyone: don't ask the person to step in front of it.
+        $("guideWords").textContent = lost && frozen ? "Camera paused" : g.words ?? "Step in front of the camera";
+        $("guideMath").textContent = lost ? (frozen ? "Directions come back when the camera does." : "I can't see you right now.")
           : (g.dir === 0 ? "Straight ahead" : `Turn ${Math.abs(g.dir)}° ${g.dir > 0 ? "right" : "left"}`) + (g.metres ? ` · about ${g.metres} m away` : "");
         if (!lost) point(g.dir);
         if (g.words && g.words !== lastWords && Date.now() > answering) { lastWords = g.words; say(g.words); }

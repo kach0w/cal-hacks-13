@@ -112,8 +112,8 @@ class Care:
     def _run(self, question: str) -> dict:
         t0, looked = time.time(), []
         if not self.on:
-            return self._out("Claude isn't set up on this laptop, so this part is off. Everything else "
-                             "on the page works as usual. To turn it on, add ANTHROPIC_API_KEY to the .env file.",
+            return self._out("Claude isn't set up for this home yet, so this part is off. Everything else "
+                             "on the page works as usual.",
                              "off", looked, t0)
         now = datetime.now().strftime("%A %d %B, %I:%M %p").replace(" 0", " ")
         messages = [{"role": "user", "content": f"(It is now {now}.)\n\n{question}"}]

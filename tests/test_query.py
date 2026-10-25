@@ -113,10 +113,10 @@ def ev(kind, oid="glasses", frm="table", to="table", status="inferred", containe
 
 def test_describe_uses_names(tmp_path):
     _, _, _, q = world(tmp_path)
-    assert q.describe(ev("inferred_contained")) == "glasses went into the blue bag — inferred (0.90)"
+    assert q.describe(ev("inferred_contained")) == "glasses went into the blue bag (inferred, 0.90)"
     assert q.describe(ev("moved", to="kitchen counter")) == \
         "glasses moved from on the table to on the kitchen counter (inside the blue bag, inferred)"
-    assert q.describe(ev("disappeared", to=None, container=None)) == "glasses disappeared from on the table"
+    assert q.describe(ev("disappeared", to=None, container=None)) == "glasses disappeared from the table"
     assert q.describe(ev("appeared", frm=None, container=None)) == "glasses appeared on the table"
 
 

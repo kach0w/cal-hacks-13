@@ -62,9 +62,9 @@ stops sending frames, the memory freezes instead of deciding everything vanished
 of every object and the camera's heartbeat. That's what makes "what changed today?" and "how often
 did the glasses go missing this week?" one query, and it means the history is there for the care
 partner even when they're not in the house. Photos never leave the laptop: only the facts are
-stored. Events go into a TimescaleDB hypertable, and a continuous aggregate (`recall_daily`) keeps
+stored. Events go into a time-partitioned hypertable, and a continuous aggregate (`recall_daily`) keeps
 per-day counts for the page's "This week" panel. A benchmark over about 900,000 synthetic events
-(TimescaleDB in Docker on a laptop) showed the columnstore 83% smaller and a month-long summary
+(run in Docker on a laptop) showed the columnstore 83% smaller and a month-long summary
 across 200 households about 10x faster from the aggregate.
 
 **Asking.** Speech-to-text runs on the laptop with faster-whisper and Silero VAD. Exact item names

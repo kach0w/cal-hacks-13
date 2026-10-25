@@ -6,7 +6,7 @@ numpy
 open3d==0.19.0             # Part E: ray-casting the room mesh. 0.20 needs brew install libusb on Apple silicon
 trimesh                    # Part E: reading room.glb the way the setup tools do
 pytest
-moss                       # Moss semantic search: which item a vague question means (optional at runtime)
+moss>=1.21                 # Moss semantic search: which item a vague question means (optional at runtime)
 sounddevice                # recall.voice: the laptop mic
 faster-whisper             # recall.voice: speech to text on the laptop (Whisper, plus the Silero VAD it ships)
 bleak                      # Bluetooth LE to the band (recall/band.py)
