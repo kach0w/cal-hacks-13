@@ -75,7 +75,7 @@ items.json            tracked-item dictionary (committed)
 data/zones.json       image zones: named boxes in the camera image (places before Part E)
 data/state.json       WorldState, atomic writes
 data/events.jsonl     append-only Transitions — the source of truth for history/diff
-data/photos/          one annotated JPEG per transition (photo_path); kept on the laptop, never shown or served
+data/photos/          one annotated JPEG per transition (photo_path)
 data/heartbeat.json   {last_frame_ts, camera_ok} — how fresh the memory is ("as of" stamping)
 data/replay/          state/events/photos of the last --src video replay (wiped each replay)
 data/range_test/      task 0 bursts per station + report/ sheets
@@ -430,7 +430,7 @@ Nothing starts before the task above it passes its check.
 | 1 | **Run A–D on the real camera.** `pip install -r requirements.txt`; detector ms/frame (range test prints it); `enroll calibrate`; places: `surfaces name` once the room is registered, else `zones onboard`; `live --show` | All props (keys, glasses, remote, wallet, bag) detected with the right label in demo lighting; detector < 150 ms/frame |
 | 2 | **Record a demo video** (`python -m tools.record data/demo1.mp4`, script below; refuses to overwrite without `--force`) and replay with `--src` | Event log matches what happened, no phantom moves from a hand passing over |
 | 3 | **Tune** `LOOP_S`, `MISSING_AFTER_K`, `MOVE_CONFIRM_N`, `CHANGE_FRACTION`, `CONTAIN_OVERLAP`, per-item `min_score`, prompts on those videos (`python -m tools.tune`, below) | Glasses→bag inferred every run; hand-over-object produces no `disappeared` |
-| 4 | **HTTP surface** (`recall/api.py`, FastAPI, **one uvicorn worker**), DESIGN §7: `GET /state`, `GET /changes?since=today`, `POST /ask {text}`, `GET /stream/{cam}` (MJPEG) — thin wrappers over `query.py`. (`GET /proximity` belongs to the wrist tracker, DESIGN §4.2. No route for the photos behind `photo_path`, on purpose: they never leave the laptop.) | care-partner page and voice layer can call it |
+| 4 | **HTTP surface** (`recall/api.py`, FastAPI, **one uvicorn worker**), DESIGN §7: `GET /state`, `GET /changes?since=today`, `POST /ask {text}`, `GET /stream/{cam}` (MJPEG) — thin wrappers over `query.py`. (`GET /proximity` belongs to the wrist tracker, DESIGN §4.2. Open: DESIGN lists no route for the photos behind `photo_path`.) | care-partner page and voice layer can call it |
 | 5 | **Part E** (Person A): `setup_room.py` (E1–E4, done); then E5 surfaces (reset the memory first, §4) | the overlay sits on the room; `state.json` shows `xyz` and surface names |
 | 6 | **Only if identity swaps:** re-id — embed `data/enroll/` crops (camera view, preferred) and `data/reference/` cutouts (phone photos, starting point) with CLIP via `open_clip`, accept a detection only if cosine ≥ 0.80 to its item, hold 0.60–0.80 | no swaps on the demo video |
 | 7 | **Only if time:** E7 viewer | pins on the mesh at the right spots |

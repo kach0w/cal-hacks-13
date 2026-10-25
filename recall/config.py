@@ -130,7 +130,7 @@ def from_args(a, **flags) -> Settings:
 def setup_logging(verbose=False):
     logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO,
                         format="%(asctime)s %(levelname).1s %(message)s", datefmt="%H:%M:%S")
-    for noisy in ("ultralytics", "PIL", "matplotlib"):
+    for noisy in ("ultralytics", "PIL", "matplotlib", "faster_whisper", "httpx"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     # ultralytics loads YOLOE's text encoder with torch.jit; the deprecation notice is not ours to fix
     warnings.filterwarnings("ignore", message=".*torch.jit.load.*is deprecated", category=FutureWarning)
