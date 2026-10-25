@@ -1,8 +1,20 @@
+# local data; data/reference/ and Person A's data/room/ deliverables are committed
 data/*
 !data/reference/
+!data/room/
+data/room/scan_raw/
+data/room/calib_frames/
+data/room/*.tmp
+data/room/xyz_map.npy
+data/room/xyz_map.sha1
+data/room/surfaces_drawn.jpg
+data/room/surfaces.png
+data/room/surfaces_camera.jpg
+*.zip
+# environment and model weights
+.venv/
 __pycache__/
 *.pt
-.venv/
 mobileclip*.ts
 .DS_Store
 range_log.csv

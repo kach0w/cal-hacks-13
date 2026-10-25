@@ -2,7 +2,7 @@
 
 **A room that remembers for you.**
 
-Two cameras watch a room and remember where the objects that matter ended up — keys,
+A camera watches a room and remembers where the objects that matter ended up — keys,
 wallet, glasses, phone. Tap the band, say *"I can't find my glasses,"* and hear the answer in
 a second. Then the band buzzes faster as you get closer, so you don't have to remember the
 answer to use it.
@@ -54,8 +54,8 @@ when the band is flat the voice half still answers.
 **The care partner — the second user.** Usually not in the house. They get one page: what's
 where, what changed today, and the picture behind any claim. That turns "is she okay" into
 something answerable without a call that feels like checking up on her. They also do the
-one-time setup: put one printed tag in the middle of the room, scan with a phone, take the
-tag away again. About ten minutes, and never the primary user's job.
+one-time setup: put up a few printed markers, scan the room with a phone. About twenty
+minutes, and never the primary user's job.
 
 **Who buys it.** Families first, then memory-care facilities running the same product
 across many rooms. The second market is shared workplaces (§7), which is the same engine
@@ -65,7 +65,7 @@ with a different reason for the memory to be missing.
 
 ## 3. What Recall does
 
-Two cameras watch a room and keep a running memory of the objects in it — not footage, but
+A camera watches a room and keeps a running memory of the objects in it — not footage, but
 **what's where, and what changed**.
 
 ```
@@ -117,18 +117,17 @@ Three decisions keep it cheap:
 - **"Getting warmer," not "turn left."** Directions need to know which way the body is
   facing, and facing is where all the cost and all the error live. A confidently wrong
   instruction given to someone who can't check it is the one failure this can't survive.
-- **The band wears a magenta marker, and the cameras track it.** Both cameras find the
-  colour and triangulate it. That gives wrist-level precision instead of feet-on-the-floor,
-  where the gradient would go flat exactly in the last half metre.
+- **The band wears a magenta marker, and the camera tracks it.** That gives wrist-level
+  precision instead of feet-on-the-floor, where the gradient would go flat exactly in the
+  last half metre.
 - **Bluetooth from the laptop, never venue wifi.** Captive portals break microcontroller
   joins, and venue networking is the top demo-ending risk.
 
-**Setup is once, and it's not her job.** One printed tag goes in the middle of the room. A
-phone scan maps the room's surfaces, couches included; both cameras see the same tag, which
-puts the scan and the cameras in one set of coordinates. Then the tag comes off. Objects move
-freely after that — their positions are recomputed against the unchanged map, never
-rescanned ([DESIGN.md](./DESIGN.md) §1–2). Distances are real metres, so the band works even
-when the wrist is in one camera's view and the object in the other's.
+**Setup is once, and it's not her job.** A few printed markers go up on the floor and a
+wall. A phone scan maps the room's surfaces, couches included, and finds the markers in it;
+the camera sees the same markers, which puts the scan and the camera in one set of
+coordinates. Objects move freely after that — their positions are recomputed against the
+unchanged map, never rescanned ([DESIGN.md](./DESIGN.md) §1–2).
 
 **The pulse also carries certainty.** An inferred answer can never buzz as hard as an
 observed one. The system's promise is that it never confidently lies, and the band honours
@@ -138,16 +137,16 @@ that in the channel the person is actually using ([DESIGN.md](./DESIGN.md) §5.2
 
 **Guidance works only where a camera sees the wrist.** Voice answers from anywhere; the band
 guides inside the scanned room. The real interaction is *voice gets you to the room, the
-band finds it in the room* — which is how the product scales, one or two cameras per room.
+band finds it in the room* — which is how the product scales, one camera per room.
 
 **Small things are hard to see across a room.** A webcam at 5m gives keys a handful of
 pixels. Camera placement and prop choice follow from measuring this, not assuming it.
 
 **The map goes stale if furniture moves.** Small objects never touch it. A moved armchair
-means putting the tag back on its taped outline and rescanning.
+means rescanning; the markers stay up, so nothing else is redone.
 
-**The band needs both cameras to see the wrist.** Behind a couch from one side, guidance
-goes quiet until the hand is back in view of both.
+**The band needs the camera to see the wrist.** Behind a couch, guidance goes quiet until the
+hand is back in view.
 
 **It has to be worn and charged, and that's a staging question.** The band serves
 mild-to-moderate stages; the voice half serves later ones. One band on a bedside dock
@@ -212,11 +211,11 @@ answer is forgotten — the failure mode the condition guarantees.
 
 ## 7. The demo
 
-**Setup.** Two cameras on stands at opposite corners of the demo area, overlapping in the
-middle; a table read as a kitchen counter and a chair or side table as a second surface.
-Scanned and registered before judging opens. Five objects every judge recognises and has
+**Setup.** One camera on a stand, high in a corner of the demo area; a table read as a
+kitchen counter and a chair or side table as a second surface; markers on the floor and the
+wall it faces. Scanned and registered before judging opens. Five objects every judge recognises and has
 personally lost: **keys, wallet, glasses, phone, remote**, plus a bag — chosen by what
-`scripts/range_test.py` says the cameras can see at the demo distances. One band.
+`scripts/range_test.py` says the camera can see at the demo distances. One band.
 
 | Time | Beat |
 |---|---|
@@ -250,12 +249,12 @@ thing that's flawless, when reliability *is* the demo.
 
 | # | Thing | Why it survived the cut |
 |---|---|---|
-| 1 | Range test: can the cameras see the props across the room? | Decides camera placement and props. Everything below assumes the answer |
+| 1 | Range test: can the camera see the props across the room? | Decides camera placement and props. Everything below assumes the answer |
 | 2 | Camera loops, YOLO-World given the names of 5 objects + the bag | No product without it |
 | 3 | Wrist marker → on-screen proximity meter, **pixel space, one camera** | Rung 2, and the fallback if setup fails. No calibration, so it starts on minute one |
 | 4 | Marker colour verified under demo lighting | The one part lighting can break. Two minutes early, fatal late |
-| 5 | Setup: one tag in the middle, phone scan, click the tag's corners, cameras register, tape-measure check | Puts the scan and both cameras in one set of coordinates |
-| 6 | Triangulation for the wrist and for objects both cameras see; depth images from the scan for objects one camera sees | Real positions, couches included |
+| 5 | Setup (`tools/`): markers up, Polycam raw scan → `scan_to_room.py`, lens calibration, `register_camera.py`, `check_room.py` | Puts the scan and the camera in one set of coordinates: the handoff to B |
+| 6 | `pixel_to_world` from the scan for every object (B, CAMERA.md Part E) | Real positions, couches included |
 | 7 | Surfaces named in the map → "on the counter" | The human-readable half of every answer |
 | 8 | Containment guess on disappearance, observed/inferred + confidence | **The wow moment**, and the most fragile code in the project |
 | 9 | Append-only log → what's where / what changed today | Cheap, and the care-partner page needs it |
@@ -265,8 +264,8 @@ thing that's flawless, when reliability *is* the demo.
 | 13 | The band: BLE, servo rate = closeness × ceiling, double-pulse on found | The novelty. The found-pulse is also how guidance *ends* |
 | 14 | One care-partner page, polling, no interactivity | Second user, cheapest possible form |
 
-**If 5 or 6 won't come good, ship 3.** Pixel-space guidance within one camera is the whole
-demo minus walking between cameras.
+**If 5 or 6 won't come good, ship 3.** Pixel-space guidance is the whole demo minus real
+distances.
 
 The full process is [DESIGN.md](./DESIGN.md) §1.
 
@@ -276,10 +275,10 @@ The full process is [DESIGN.md](./DESIGN.md) §1.
 |---|---|
 | **LLM query layer** | Templated answers cover four question shapes with less latency and fewer failure modes at a loud table |
 | **Evidence clips** → stills | ~90% of the value for a fraction of the work |
-| **Own iOS scanning app, RoomPlan** | An existing scan app plus clicking the tag's corners gets the same map. Surface names come from setup |
+| **Own iOS scanning app, RoomPlan** | Polycam's raw export has the mesh, keyframes, poses and LiDAR depth already. Build our own only if that export fails `scan_to_room.py`'s alignment check |
 | **Editing or re-scanning the map at runtime** | Small objects never touch it; the memory carries them |
 | **Image fingerprints for identity (re-id)** | YOLO-World's name for the object is the identity. Props are chosen so no two share a name |
-| **A tag on the band** | Both cameras triangulate the magenta marker. Add a tag only if one camera is blocked too often |
+| **A second camera** | CAMERA.md: one corner camera. The tools take a second one without changes if it comes back |
 | **Phone-in-a-pocket fallback** | iPhone web pages can't vibrate, so it's an app. The on-screen meter is the fallback |
 | **Time-series database** | Flat append-only JSON |
 | **Diff views, history scrubbing, revert flows** | Never on the demo path |
@@ -384,8 +383,8 @@ driven at the moment of maximum confusion — and it finds the tag, never the un
 
 **"Isn't a camera in her home invasive?"** §6, volunteered before they ask.
 
-**"Who scans the room?"** The care partner, once, in about ten minutes: a phone scan and one
-printed tag that comes off afterwards. Objects move all day without anyone touching the map.
+**"Who scans the room?"** The care partner, once, in about twenty minutes: a phone scan and a
+few printed markers on the floor and a wall. Objects move all day without anyone touching the map.
 
 **"Isn't the world model just a scene graph?"** Essentially yes — say it before they do.
 Robotics has better ones. None deliver to a person, none consider a cognitive deficit, none
@@ -408,8 +407,8 @@ close the loop with an actuator a human wears.
 > answer the question just *tell* her — which only works if she still remembers it when she
 > gets to the kitchen."
 >
-> **Recall.** "Two cameras in the corners of her room. They don't keep footage — they
-> remember objects. She taps her band, asks out loud, and it answers in a second."
+> **Recall.** "A camera in the corner of her room. It doesn't keep footage — it
+> remembers objects. She taps her band, asks out loud, and it answers in a second."
 >
 > **The wow.** "And here's what no camera does: the glasses aren't in any frame. Recall
 > still knows they're in the blue bag, because it saw them go in. It tells you that's an
@@ -449,8 +448,10 @@ truth is better than their assumption.
       and 1280. Where the hit rate falls below ~20/30 is the usable range.
 - [ ] **Build the proximity meter before the strap.** The meter first, always — it needs no
       calibration, so it can start on minute one against a stubbed marker position.
-- [ ] **Confirm both cameras see the setup tag at once** from their demo positions, then
-      tape its outline.
+- [ ] **Polycam: Developer mode on before scanning, LiDAR mode (not Room).** Developer mode
+      doesn't apply to scans made before it was switched on.
+- [ ] **Confirm the camera sees at least 3 markers face-on** from its demo position, on the
+      floor and a wall it faces.
 - [ ] **Scan with the surfaces cleared**, and keep the bag out of the scan — it's an object.
 - [ ] **Tape-measure the setup.** Two points on the table, map distance vs. real. Off by more
       than a few cm → check the ARKit/OpenCV axis flip before anything else.
