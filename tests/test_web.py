@@ -1,6 +1,9 @@
 """The web page over a fake memory: board state, ask + guidance start, container targets, HTTP."""
 import json
+import urllib.error
 import urllib.request
+
+import pytest
 
 from fakes import BAG_TABLE, FRAME, GLASSES_OVER_BAG, KEYS_TABLE, S, world
 from recall.camera import Frame
@@ -85,6 +88,19 @@ def test_http_routes(tmp_path):
     assert json.loads(get("/state"))["places"] == ["kitchen counter", "table"]
     assert "table" in json.loads(get("/ask?q=where%20are%20my%20keys"))["answer"]
     assert json.loads(get("/guide"))["item"] == "keys"
+
+
+def test_saved_photos_never_reach_the_page(tmp_path):
+    web, memory = make(tmp_path)
+    for t in (1, 2, 3):
+        memory.update([S("keys", KEYS_TABLE)], FRAME, t)
+    photo = memory.state["keys"].photo_path
+    assert photo and memory.store.photo_file(photo)              # kept on the laptop...
+    assert "photo" not in web.ask("where are my keys")           # ...but never named
+    url = web.start(port=0).replace(web.start.__globals__["lan_ip"](), "127.0.0.1")
+    with pytest.raises(urllib.error.HTTPError, match="404"):     # ...or served
+        urllib.request.urlopen(url + "/photo/" + photo)
+    assert b"/photo/" not in urllib.request.urlopen(url + "/").read()
 
 
 def test_guidance_goes_to_the_band(tmp_path):

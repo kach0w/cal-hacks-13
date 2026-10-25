@@ -12,7 +12,10 @@ Runs inside live (it needs the newest frame and the memory), on its own threads:
 The 🎤 button asks out loud (browser speech-to-text) and the answer is spoken back; with
 MOSS_PROJECT_ID/MOSS_PROJECT_KEY set, Moss resolves vague wording to an item (moss_search.py).
 
-Routes: /  /state  /ask?q=  /guide  /cam.jpg  /photo/<path>
+Routes: /  /state  /ask?q=  /guide  /cam.jpg
+
+The photo the memory keeps of each move (data/photos/) never reaches the page: no route serves it
+and /ask doesn't name it. It stays on the laptop.
 
 With --band, every guidance update also goes to the necklace (firmware/band) as a UDP
 packet "dir,dist": dir in degrees, + = to the person's right; dist 0..100. The servo reaches
@@ -26,7 +29,7 @@ import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, urlparse
 
 import cv2
 
@@ -142,12 +145,12 @@ class Web:
         try:
             a = handle(text, self.query)
         except ValueError as e:
-            return {"answer": str(e), "status": "info", "photo": None}
+            return {"answer": str(e), "status": "info"}
         oid = find_item(self.query, text)
         if oid and a.status in ("observed", "inferred", "unknown"):
             with self._lock:
                 self.guiding.update(item=oid, since=time.time(), dir=None, target=None, note=None)
-        return {"answer": a.text, "status": a.status, "photo": a.photo_path}
+        return {"answer": a.text, "status": a.status}
 
     def guidance(self) -> dict:
         with self._lock:
@@ -303,9 +306,6 @@ class Web:
                     with web._lock:
                         jpg = web.cam_jpg
                     self._send(jpg, "image/jpeg") if jpg else self.send_error(404)
-                elif url.path.startswith("/photo/"):
-                    p = web.memory.store.photo_file(unquote(url.path[len("/photo/"):]))
-                    self._send(p.read_bytes(), "image/jpeg") if p else self.send_error(404)
                 else:
                     self.send_error(404)
 
@@ -364,7 +364,6 @@ PAGE = """<!doctype html>
   #mic { background: var(--card); border: 1px solid var(--line); padding: 12px 14px; }
   #mic.on { background: #d0342f; border-color: #d0342f; }
   #answer { font-size: 1.25rem; font-weight: 600; min-height: 1.5em; white-space: pre-line; margin: 12px 0; }
-  #photo { max-width: 100%; border-radius: 10px; display: block; }
   #guide { display: flex; align-items: center; gap: 18px; background: var(--card); border: 1px solid var(--line);
            border-radius: 12px; padding: 14px 18px; margin-top: 12px; }
   #arrow { width: 72px; height: 72px; flex: none; transition: transform 150ms linear; }
@@ -392,7 +391,6 @@ PAGE = """<!doctype html>
     <section>
       <form id="ask"><input id="q" placeholder="Where are my keys?" autocomplete="off"><button type="button" id="mic" hidden title="Ask out loud">🎤</button><button>Ask</button></form>
       <p id="answer"></p>
-      <img id="photo" hidden alt="Where it was last seen">
       <div id="guide" hidden>
         <svg id="arrow" viewBox="0 0 100 100"><polygon points="50,6 66,52 54,46 54,94 46,94 46,46 34,52" fill="var(--accent)"/></svg>
         <div><div id="guideWords">Looking for you…</div><div id="guideSub"></div></div>
@@ -414,8 +412,6 @@ PAGE = """<!doctype html>
     e?.preventDefault();
     const r = await (await fetch("/ask?q=" + encodeURIComponent($("q").value))).json();
     $("answer").textContent = r.answer;
-    $("photo").hidden = !r.photo;
-    if (r.photo) $("photo").src = "/photo/" + encodeURIComponent(r.photo);
     say(r.answer);
   };
 
