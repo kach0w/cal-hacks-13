@@ -50,6 +50,10 @@ class Settings:
     zone_margin_px: float = 10.0       # base point may sit this far outside a zone box
     surface_margin_m: float = 0.05     # world point may sit this far outside a surface box
 
+    # --- guidance in the room (recall/body.py) ----------------------------------
+    shoulder_height_m: float = 1.40    # the guided person's shoulder height: about 0.82 x their height
+    guide_smooth: float = 0.5          # 0..1, share of each look taken: higher = turns show sooner, jitterier
+
     # --- re-id (task 6; only used when an identity check is plugged in) ------
     reid_accept: float = 0.80          # cosine to the item's references: commit
     reid_hold: float = 0.60            # between hold and accept: commit nothing either way

@@ -12,7 +12,8 @@ Runs inside live (it needs the newest frame and the memory), on its own threads:
 Routes: /  /state  /ask?q=  /guide  /cam.jpg  /photo/<path>
 
 With --band, every guidance update also goes to the necklace (firmware/band) as a UDP
-packet "dir,dist": dir in degrees, + = to the person's right; dist 0..100. When guidance
+packet "dir,dist": dir in degrees, + = to the person's right; dist 0..100. The servo reaches
+±90, so further round the arrow waves at that side's edge: 'turn around, this way'. When guidance
 stops, nothing is sent and the band parks its arrow by itself after a second.
 """
 import json
@@ -36,11 +37,24 @@ log = logging.getLogger("recall")
 
 PORT = 8000
 GUIDE_FOR_S = 60       # stop guiding this long after a question
-GUIDE_EVERY_S = 0.15   # how often the guidance thread looks
+GUIDE_EVERY_S = 0.1    # pause between the guidance thread's looks
 BAND_PORT = 4210       # firmware/band/band.ino listens here
 BAND_RETRY_S = 5       # look the band up again this often until it's on the wifi
 BAND_HOLD_S = 1.5      # person lost for a moment: keep sending the last direction this long
+BAND_BEHIND_DEG = 150  # further round than this either way, the band keeps the side it was on
+BAND_REACH_DEG = 90    # the servo's travel each side of ahead (firmware/band)
+BAND_WAVE_DEG = 30     # past its reach the arrow swings between the edge and this far in from it
 CAM_WIDTH = 960        # the page's camera picture
+
+
+def band_dir(deg, side):
+    """(direction to send the band, the side it's on now: +1 right, -1 left). The band's servo
+    reaches ±90, so anything further round sits at that side's edge. Straight behind, a few
+    degrees of wobble flip the turn between +179 and -179, which would swing the arrow edge to edge
+    each time: past BAND_BEHIND_DEG it keeps to the side it was on."""
+    if side and abs(deg) > BAND_BEHIND_DEG and math.copysign(1, deg) != side:
+        deg = -deg
+    return deg, math.copysign(1, deg)
 
 
 class Web:
@@ -56,6 +70,8 @@ class Web:
         self.cam_jpg = None
         self.band_host = band
         self.band = None  # (ip, port) of the necklace once --band's host is found
+        self.band_side = 0  # band_dir's side, 0 before anything is sent
+        self._waving = False  # which end of the wave the last packet past the servo's reach was
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     def _find_band(self):
@@ -73,11 +89,19 @@ class Web:
                 time.sleep(BAND_RETRY_S)
 
     def _send_band(self, deg, dist):
+        """Sends a turn to the band; returns the direction it was sent."""
+        deg, self.band_side = band_dir(deg, self.band_side)
+        if abs(deg) > BAND_REACH_DEG:
+            # The servo can't point there and would sit still at its edge (the left edge is also
+            # where it rests): wave at that edge instead, a step per packet.
+            deg = math.copysign(BAND_REACH_DEG - BAND_WAVE_DEG * self._waving, deg)
+            self._waving = not self._waving
         if self.band:
             try:
                 self._sock.sendto(f"{int(round(deg))},{int(dist)}".encode(), self.band)
             except OSError:  # band off or out of range: the page keeps guiding
                 pass
+        return deg
 
     def _hold(self):
         """The person was lost for a moment (a hidden shoulder, someone walking past): repeat the last
@@ -165,13 +189,16 @@ class Web:
         r = self.pipeline.latest()
         if r is None:
             return
-        shown = live_view(r.frame.image, r, self.places, self.memory.state, self.items, room=self.room)
+        # The newest camera frame: r.frame is the one detection last looked at, once per LOOP_S,
+        # and guiding on it froze the arrow for a second at a time.
+        frame = (self.pipeline.source.read() if self.pipeline.source.live else None) or r.frame
+        shown = live_view(frame.image, r, self.places, self.memory.state, self.items, room=self.room)
         with self._lock:
             oid = self.guiding["item"]
             if oid and time.time() - self.guiding["since"] > GUIDE_FOR_S:
                 self.guiding["item"] = oid = None
         if oid:
-            self._point(oid, r.frame.image, shown)
+            self._point(oid, frame.image, shown)
         h, w = shown.shape[:2]
         small = cv2.resize(shown, (CAM_WIDTH, int(CAM_WIDTH * h / w)))
         jpg = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 70])[1].tobytes()
@@ -187,7 +214,7 @@ class Web:
             return
         xyz, target_name = found
         if self.pose is None:
-            self.pose, self.body = PoseModel(), Body(self.room)
+            self.pose, self.body = PoseModel(), Body(self.room, self.cfg.shoulder_height_m, self.cfg.guide_smooth)
         person = self.pose.largest(image)
         if person is None or not self.body.update(*person):
             self._hold()
@@ -196,7 +223,9 @@ class Web:
         deg, dist, metres = self.body.turn(xyz)
         with self._lock:
             self.guiding.update(dir=deg, dist=dist, metres=metres, target=target_name, t=time.time())
-        self._send_band(deg, dist)
+        sent = self._send_band(deg, dist)
+        log.debug("guide: at (%.2f, %.2f) facing %+4.0f (%s; nose %.2f eye %.2f)  turn %+4.0f  band %+4.0f  %.1f m",
+                  *self.body.pos, math.degrees(self.body.yaw), self.body.why, *self.body.face, deg, sent, metres)
         draw(shown, self.room, self.body, xyz, f"{target_name}: {words(deg, dist)}", deg, metres)
 
     def _point(self, oid, image, shown):
