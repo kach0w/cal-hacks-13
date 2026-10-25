@@ -6,7 +6,8 @@
     "plural": true,
     "container": false,
     "min_score": null,
-    "reference": "reference/keys.png"
+    "reference": "reference/keys.png",
+    "about": "what you lock and unlock the front door and start the car with"
   },
   "glasses": {
     "name": "glasses",
@@ -15,7 +16,8 @@
     "plural": true,
     "container": false,
     "min_score": null,
-    "reference": "reference/glasses.png"
+    "reference": "reference/glasses.png",
+    "about": "what you wear on your face to read or see clearly"
   },
   "remote": {
     "name": "remote",
@@ -24,7 +26,8 @@
     "plural": false,
     "container": false,
     "min_score": null,
-    "reference": "reference/remote.png"
+    "reference": "reference/remote.png",
+    "about": "what you change the TV channel and volume with"
   },
   "wallet": {
     "name": "wallet",
@@ -33,7 +36,8 @@
     "plural": false,
     "container": false,
     "min_score": null,
-    "reference": "reference/wallet.png"
+    "reference": "reference/wallet.png",
+    "about": "where you keep your money, cards and ID"
   },
   "bag": {
     "name": "bag",
@@ -42,6 +46,7 @@
     "plural": false,
     "container": true,
     "min_score": null,
-    "reference": null
+    "reference": null,
+    "about": "what you carry groceries and things around in"
   }
 }

@@ -1,4 +1,5 @@
 """Ask the memory questions. Typed here; the voice layer and POST /ask call handle().
+With MOSS_PROJECT_ID/MOSS_PROJECT_KEY set, vague wording is resolved by Moss (recall/moss_search.py).
 
     python -m recall.ask                         # REPL
     python -m recall.ask "where are my glasses"
@@ -15,6 +16,7 @@ import time
 from . import config
 from .enroll import load_items
 from .models import Answer
+from .moss_search import MossSearch
 from .query import Query, clock, parse_since, stamp
 from .store import Store
 
@@ -29,6 +31,11 @@ def match_item(items, text) -> str | None:
             if term and f" {term} " in t and len(term) > best_len:
                 best, best_len = oid, len(term)
     return best
+
+
+def find_item(q, text) -> str | None:
+    """The item a question is about: exact words first, then Moss semantic search if it's on."""
+    return match_item(q.items, text) or (q.moss.match(text) if q.moss else None)
 
 
 def _since_arg(t):
@@ -65,7 +72,7 @@ def handle(text, q: Query, now=None) -> Answer:
         return stamp(Answer(text, "info"), as_of)
 
     if t.startswith("history"):
-        oid = match_item(items, t)
+        oid = find_item(q, t)
         if not oid:
             return Answer("History of what? e.g. 'history keys'", "info")
         h = q.history(oid)
@@ -79,7 +86,7 @@ def handle(text, q: Query, now=None) -> Answer:
                 or f"Nothing has changed since {clock(since)}.")
         return stamp(Answer(text, "info"), as_of)
 
-    oid = match_item(items, t)
+    oid = find_item(q, t)
     a = q.where_is(oid, now, stamped=False) if oid else Answer("I don't have a record of that.", "none")
     return stamp(a, as_of)
 
@@ -92,6 +99,7 @@ def main():
     a = ap.parse_args()
     cfg = config.from_args(a)
     q = Query(cfg, load_items(cfg.items_path), Store(cfg.replay_dir) if a.replay else None)
+    q.moss = MossSearch.from_env(q.items)
 
     def answer(text):
         r = handle(text, q)

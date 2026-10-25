@@ -8,6 +8,9 @@ Runs inside live (it needs the newest frame and the memory), on its own threads:
   - a guidance thread: while someone is being guided, finds them with a pose model and points
     them at the item, or at its container when the memory says it went into one.
 
+The 🎤 button asks out loud (browser speech-to-text) and the answer is spoken back; with
+MOSS_PROJECT_ID/MOSS_PROJECT_KEY set, Moss resolves vague wording to an item (moss_search.py).
+
 Routes: /  /state  /ask?q=  /guide  /cam.jpg  /photo/<path>
 
 With --band, every guidance update also goes to the necklace (firmware/band) as a UDP
@@ -25,7 +28,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import cv2
 
-from .ask import handle, match_item
+from .ask import find_item, handle
+from .moss_search import MossSearch
 from .guide import SHOULDER_M, Guide, words
 from .overlay import live_view
 from .query import Query, clock
@@ -44,6 +48,7 @@ class Web:
         self.cfg, self.items, self.memory, self.pipeline = cfg, items, memory, pipeline
         self.places, self.room = places, room
         self.query = Query(cfg, items, memory.store)
+        self.query.moss = MossSearch.from_env(items)
         self.guide = None  # the pose model loads on the first question, not at start-up
         self._lock = threading.Lock()
         self.guiding = {"item": None, "since": 0.0, "dir": None, "dist": 100, "metres": None,
@@ -85,7 +90,7 @@ class Web:
             a = handle(text, self.query)
         except ValueError as e:
             return {"answer": str(e), "status": "info", "photo": None}
-        oid = match_item(self.items, text)
+        oid = find_item(self.query, text)
         if oid and a.status in ("observed", "inferred", "unknown"):
             with self._lock:
                 self.guiding.update(item=oid, since=time.time(), dir=None, target=None)
@@ -258,6 +263,8 @@ PAGE = """<!doctype html>
   input { flex: 1; min-width: 0; font: inherit; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px;
           background: var(--card); color: var(--fg); }
   button { font: inherit; font-weight: 600; padding: 12px 18px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; }
+  #mic { background: var(--card); border: 1px solid var(--line); padding: 12px 14px; }
+  #mic.on { background: #d0342f; border-color: #d0342f; }
   #answer { font-size: 1.25rem; font-weight: 600; min-height: 1.5em; white-space: pre-line; margin: 12px 0; }
   #photo { max-width: 100%; border-radius: 10px; display: block; }
   #guide { display: flex; align-items: center; gap: 18px; background: var(--card); border: 1px solid var(--line);
@@ -285,7 +292,7 @@ PAGE = """<!doctype html>
   <h1>Recall</h1>
   <div class="top">
     <section>
-      <form id="ask"><input id="q" placeholder="Where are my keys?" autocomplete="off"><button>Ask</button></form>
+      <form id="ask"><input id="q" placeholder="Where are my keys?" autocomplete="off"><button type="button" id="mic" hidden title="Ask out loud">🎤</button><button>Ask</button></form>
       <p id="answer"></p>
       <img id="photo" hidden alt="Where it was last seen">
       <div id="guide" hidden>
@@ -306,13 +313,30 @@ PAGE = """<!doctype html>
   const say = text => { speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance(text)); };
 
   $("ask").onsubmit = async e => {
-    e.preventDefault();
+    e?.preventDefault();
     const r = await (await fetch("/ask?q=" + encodeURIComponent($("q").value))).json();
     $("answer").textContent = r.answer;
     $("photo").hidden = !r.photo;
     if (r.photo) $("photo").src = "/photo/" + encodeURIComponent(r.photo);
     say(r.answer);
   };
+
+  // Ask out loud: the browser's speech-to-text (Chrome, Safari; needs localhost or https), then
+  // the same /ask as typing. Moss on the server works out which item vague wording means.
+  const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (Rec) {
+    const rec = new Rec();
+    rec.lang = "en-US"; rec.interimResults = true;
+    $("mic").hidden = false;
+    $("mic").onclick = () => { speechSynthesis.cancel(); rec.start(); };
+    rec.onstart = () => { $("mic").classList.add("on"); $("q").value = ""; $("q").placeholder = "Listening…"; };
+    rec.onresult = e => {
+      const r = e.results[e.results.length - 1];
+      $("q").value = r[0].transcript;
+      if (r.isFinal) $("ask").onsubmit();
+    };
+    rec.onend = () => { $("mic").classList.remove("on"); $("q").placeholder = "Where are my keys?"; };
+  }
 
   async function tick() {
     try {

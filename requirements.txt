@@ -6,6 +6,7 @@ numpy
 open3d>=0.18               # Part E: ray-casting the room mesh
 trimesh                    # Part E: reading room.glb the way the setup tools do
 pytest
+moss                       # Moss semantic search: which item a vague question means (optional at runtime)
 # Task 4 (HTTP):
 fastapi
 uvicorn

@@ -51,6 +51,7 @@ class Query:
     def __init__(self, cfg, items, store: Store | None = None):
         self.cfg, self.items = cfg, items
         self.store = store or Store(cfg.data_dir)
+        self.moss = None  # a MossSearch, when the caller turns semantic item matching on
 
     def places(self) -> Places:
         """Read fresh, only to word answers: the image zones, and the surfaces once the room is
