@@ -601,6 +601,8 @@ PAGE = """<!doctype html>
   .week-grid thead th.today { color: var(--fg); }
   .week-grid col.thing { width: 6.5rem; }
   .week-grid tbody th { font-size: .9375rem; padding-right: 6px; line-height: 1.25; }
+  .week-grid tbody th, .week-grid thead th:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface);
+                                                        box-shadow: 4px 0 0 var(--surface); }
   .week-grid td { height: 36px; text-align: center; font-weight: 650; font-variant-numeric: tabular-nums;
                   border-radius: var(--r-s); background: var(--sunken); }
   .week-grid td[data-n="1"] { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); }
@@ -937,7 +939,6 @@ PAGE = """<!doctype html>
       const r = await fetch("/week", { signal: ctl.signal });
       if (!r.ok) throw new Error(r.status);
       const w = await r.json(), key = JSON.stringify(w);
-      $("weekCard").setAttribute("aria-busy", "false");
       if (key !== lastWeek) {
         lastWeek = key;
         $("weekSrc").textContent = w.source === "database" ? "From the database" : "From this laptop";
@@ -952,6 +953,7 @@ PAGE = """<!doctype html>
           w.items.filter(it => it.per_day.some(n => n)).map(it => `<tr><th scope="row">${esc(cap(it.name))}</th>` +
             it.per_day.map(c => `<td data-n="${Math.min(c, 3)}">${c || '<span class="vh">none</span>'}</td>`).join("") + `</tr>`).join("") +
           `</tbody>`;
+        $("weekScroll").scrollLeft = $("weekScroll").scrollWidth;  // a narrow screen opens on today
         const by = {};
         for (const s of w.spots) (by[s.name] = by[s.name] || []).push(s);
         // "Usually" once something has gone missing more than once; before that, just where it went.
@@ -965,6 +967,7 @@ PAGE = """<!doctype html>
       if (lastWeek === null) $("weekMsg").textContent = "Couldn't load this week yet. Trying again soon.";
     } finally {
       clearTimeout(timer);
+      $("weekCard").setAttribute("aria-busy", "false");
     }
     setTimeout(weekTick, 30000);
   }

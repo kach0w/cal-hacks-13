@@ -79,8 +79,8 @@ bag on the table (7 times), on the sofa (4 times)". A caption says where the num
 **From the database** or **From this laptop**. The panel refreshes every 30 seconds.
 
 The page asks `/week`. When live has a database, the web server opens a short connection
-(2 s connect timeout) on a separate thread and waits at most 3 s. If the database is down, slow
-or has nothing, the panel shows the same numbers computed from `data/events.jsonl` on the laptop.
+(2 s connect timeout) on a separate thread and waits at most 3 s. If the database errors or is slow,
+the panel shows the same numbers computed from `data/events.jsonl` on the laptop.
 Only one database request runs at a time, so a hung connection can't pile up more.
 
 ## Benchmark (measured on TimescaleDB in Docker, not Tiger Cloud)
@@ -150,7 +150,7 @@ Without `DATABASE_URL`, Recall runs exactly as before: the panel says "From this
    database".
 3. From any other computer with the repo: `python -m recall.db week` and
    `python -m recall.db spots` print the same numbers from the service.
-4. Unplug the wifi: the panel switches to "From this laptop" within a few seconds and keeps the
+4. Unplug the wifi: the panel switches to "From this laptop" at its next refresh (within about 30 s) and keeps the
    same numbers; when the wifi is back live catches up and the caption returns to "From the
    database".
 
