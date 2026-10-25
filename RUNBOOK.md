@@ -58,17 +58,27 @@ export RECALL_SRC=N RECALL_DETECTOR=yoloe RECALL_DETECT_IMGSZ=640
 2. `python -m recall.enroll calibrate` — one item at a time, in the middle of the surface. When the
    green box sits on the item press **SPACE**; move or turn it a little; SPACE again — 3 times per
    item. n = next item, q = quit (accepted samples are kept).
-3. `python -m recall.zones onboard` — a numbered picture opens in Preview; answer in the terminal:
-   ENTER keeps a box, typing a name renames it ("kitchen counter"), `d` deletes it; then its
-   preposition (on/in). Answer `y` to draw more: drag a box, **SPACE** to keep it, ESC when done,
-   then name each. Check with `python -m recall.zones list`.
+3. Name the places.
+   - **If `data/room/camera.json` exists** (Person A has registered the camera):
+     `python -m recall.surfaces name` — the room's top-down plan opens; drag a box over each
+     surface (table, counter, sofa), **SPACE** to keep each, ESC when done, then type each name and
+     preposition in the terminal (a numbered picture opens in Preview; check each "top at … m"
+     looks like that furniture's height). Then `python -m recall.surfaces show` and check
+     `data/room/surfaces_camera.jpg`: each outline sits on its furniture. **If live already ran on
+     zones,** reset the memory before the next live run, or it carries the zone names over:
+     `rm -rf data/state.json data/events.jsonl data/heartbeat.json data/photos`.
+   - **Otherwise:** `python -m recall.zones onboard` — a numbered picture opens in Preview; answer
+     in the terminal: ENTER keeps a box, typing a name renames it ("kitchen counter"), `d` deletes
+     it; then its preposition (on/in). Answer `y` to draw more: drag a box, **SPACE** to keep it,
+     ESC when done, then name each. Check with `python -m recall.zones list`.
 4. `python -m recall.live --show` — boxes are green when seen; the bottom-left panel is what the
    memory believes. Try it: carry the keys to another zone and wait 3 s (terminal: `MOVED`); hide the
    glasses and wait 4 s (`DISAPPEARED`); put them back (`REAPPEARED`). q quits.
 5. In a second terminal: `python -m recall.ask "where are my keys"`.
 
 **Done when** all five props are detected with the right label in demo lighting.
-**Send back:** the terminal log, `python -m recall.enroll list`, `python -m recall.zones list`.
+**Send back:** the terminal log (it says `places: surfaces …` or `places: zones …`),
+`python -m recall.enroll list`, and `python -m recall.surfaces list` or `python -m recall.zones list`.
 
 ## Task 2 — record (~15 min)
 
@@ -78,8 +88,8 @@ events are there. Record 3 normal takes and 1 fast take (glasses scooped straigh
 python -m tools.record data/demo1.mp4      # q stops; refuses to overwrite (add --force to redo)
 ```
 Check a take: `python -m recall.live --src data/demo1.mp4 --show --set REPLAY_SPEED=1`.
-Copy the expectation template from CAMERA.md into `data/demo.expect`, with your zone names from
-`python -m recall.zones list`.
+Copy the expectation template from CAMERA.md into `data/demo.expect`, with your place names from
+`python -m recall.surfaces list` (or `recall.zones list`).
 
 ## Task 3 — tune (~10 min, no camera needed)
 
@@ -92,7 +102,8 @@ the best row's diff, the `recommend:` lines) and the four videos.
 | You see | Do |
 |---|---|
 | `camera N did not open` | wrong index (`tools.cameras`) or no camera permission (setup step 6) |
-| `frames are 640x480, not ... 1280x720` | `export RECALL_CAPTURE_W=640 RECALL_CAPTURE_H=480` (use what it says), then redo zones |
+| `frames are 640x480, not ... 1280x720` | No `data/room/camera.json` yet: `export RECALL_CAPTURE_W=640 RECALL_CAPTURE_H=480` (use what it says), then redo zones. **With** a camera.json, don't: the lens calibration only holds at its size. Make the camera deliver 1280×720 (another `--src`, its settings app), or send this to Person A to calibrate and register again at the new size |
+| `room not used: camera.json is registered at 1280x720 but CAPTURE is …` | the same: CAPTURE must match camera.json |
 | a window looks frozen | it's waiting for an answer in the terminal |
 | `CERTIFICATE_VERIFY_FAILED` | setup step 2 |
 | a prop never gets a box in calibrate | n to skip it, finish the rest, report the prop |

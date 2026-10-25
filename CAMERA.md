@@ -1,12 +1,16 @@
 # Recall — camera pipeline (CAMERA.md)
 
-The build plan for everything the corner camera does: enroll items, name zones, run the
-live loop, keep the memory, and register the camera to the room mesh so positions become
-3D. Product context: [PLAN.md](./PLAN.md). System design: [DESIGN.md](./DESIGN.md).
+The build plan for everything the corner camera does: enroll items, name places, run the
+live loop, keep the memory, and use the scanned room so positions are 3D. Product context:
+[PLAN.md](./PLAN.md). System design: [DESIGN.md](./DESIGN.md) — one corner camera, a phone scan
+of the room, positions in the map. File contract between setup and the live loop:
+[handoffAB.md](./handoffAB.md).
 
-**Scope changes vs DESIGN.md:** **one camera** (no second camera, no cross-camera merge).
-The 3D mesh/registration is **added back** (Part E). Positions stay in zone/pixel space until
-the mesh handoff lands, then `xyz` fills in through one hook.
+**Where this follows DESIGN.md and where it adds to it:** the JSON seams are DESIGN §7's
+(`object`, `surface`, `from/to_xyz`, `photo_path`); places are DESIGN §6.1's named surfaces of the
+scan once the room is registered, with image zones as the fallback before that. The memory rules are
+this file's §5 (a move is a *confirmed change of place*, containment is *fraction inside*), which
+DESIGN §8 sketches more loosely.
 
 ---
 
@@ -15,13 +19,14 @@ the mesh handoff lands, then `xyz` fills in through one hook.
 | Part | What | Status |
 |---|---|---|
 | A | Enrollment — the dictionary of tracked items + per-item calibration | **Built** (`recall/enroll.py`, `items.json`) |
-| B | Zones — onboarding + manual boxes + `zone_at` | **Built** (`recall/zones.py`) |
+| B | Places — surfaces of the scan (`recall/surfaces.py`, named on its plan) once the room is registered; image zones (`recall/zones.py`) before that | **Built** (`recall/places.py`) |
 | C | Live loop — capture thread, detection thread (gate → detect → memory), frozen-camera guard | **Built** (`recall/live.py`, `pipeline.py`, `camera.py`, `gate.py`, `perception.py`) |
-| D | Memory + queries — state, append-only log, stills, where/changes/diff, "as of" stamping | **Built** (`recall/memory.py`, `store.py`, `query.py`, `ask.py`) |
-| E | Mesh + camera registration → `pixel_to_world` | **Built against a synthetic room** (`recall/room.py`, `tools/`); waiting on Person A's `data/room/` |
-| F | HTTP surface (DESIGN §5) | **To build** (task 4) |
+| D | Memory + queries — state, append-only log, photos, where/changes/diff, "as of" stamping | **Built** (`recall/memory.py`, `store.py`, `query.py`, `ask.py`) |
+| E | Scan → map + markers, lens, registration, checks (Person A's `tools/`); the runtime bridge `pixel_to_world` (`recall/room.py`) | **Scan delivered** (`data/room/`: room.glb, markers.json, plan.png). **Lens needs redoing** (§7, E2), then `register_camera.py` → camera.json |
+| F | HTTP surface (DESIGN §7) | **To build** (task 4) |
 
-Tests (fake sightings, fake detector, synthetic room — no camera): `python -m pytest tests/ -v`.
+Tests (fake sightings, fake detector, the real scan with a known pose — no camera):
+`python -m pytest tests/ -v` (includes Person A's `tests/test_room_tools.py`).
 **See it without a camera:** `python -m tools.simulate --show` plays a scripted 32 s scene built
 from the reference cutouts (keys moved, a hand over the remote, glasses gone and back, glasses
 into the bag, the bag carried away) through the real pipeline and memory, in an OpenCV window;
@@ -37,8 +42,10 @@ real camera** — that is tasks 0–1 in §8.
 ```
 SETUP (once)
   items.json  ── enroll calibrate ──▶ per-item min_score + reference crops
-  camera still ── zones onboard ────▶ data/zones.json  (named boxes in image space)
-  phone scan ──── Part E ───────────▶ room.glb + data/camera.json + data/xyz_map.npy
+  phone scan ──── Part E tools ─────▶ data/room/: room.glb, markers.json, plan.png,
+                                       intrinsics.json, camera.json   (DESIGN §1, §7 below)
+  plan.png ───── surfaces name ─────▶ data/room/surfaces.json  (named boxes in the room)
+  camera still ── zones onboard ────▶ data/zones.json  (image boxes: the fallback places)
 
 LIVE LOOP
   capture thread    grabs continuously, keeps only the newest frame
@@ -48,9 +55,9 @@ LIVE LOOP
         static            → skip (heartbeat still written)
         change/settling/heartbeat → detector on enrolled prompts (+ "person")
    → one best sighting per item
-   → zone_at(base point)                       (+ pixel_to_world(base point) once E lands)
+   → xyz = pixel_to_world(box base)   place = surface_at(xyz), or zone_at(box base) before E
    → memory.update: appeared / moved / disappeared / inferred_contained / reappeared
-   → log events; stills to data/stills/; state.json + heartbeat.json
+   → log events; photos to data/photos/; state.json + heartbeat.json
   main thread       the --show window (macOS needs it) and Ctrl-C → stop, join, release
 
 QUERIES (separate process, reads files)
@@ -65,36 +72,44 @@ QUERIES (separate process, reads files)
 **Files**
 ```
 items.json            tracked-item dictionary (committed)
-data/zones.json       zones, image-space boxes
+data/zones.json       image zones: named boxes in the camera image (places before Part E)
 data/state.json       WorldState, atomic writes
 data/events.jsonl     append-only Transitions — the source of truth for history/diff
-data/stills/          one annotated JPEG per transition
+data/photos/          one annotated JPEG per transition (photo_path)
 data/heartbeat.json   {last_frame_ts, camera_ok} — how fresh the memory is ("as of" stamping)
-data/replay/          state/events/stills of the last --src video replay (wiped each replay)
+data/replay/          state/events/photos of the last --src video replay (wiped each replay)
 data/range_test/      task 0 bursts per station + report/ sheets
 data/enroll/<id>/     crops from calibration (from the corner camera)
 data/reference/<id>.png  background-removed photos of each prop (committed) — re-id references
-data/room/            (E) Person A's delivery, formats in handoffAB.md: room.glb, markers.json,
-                      camera.json (K, dist, R, t, …), camera_ref.jpg, checks.json, zones3d.json
-                      + xyz_map.npy (H×W×3 world point per pixel, NaN = no hit; built cache)
+data/room/            (E) committed; formats in handoffAB.md. From Person A's tools: room.glb,
+                      markers.json, plan.png, scan_report.json, frame_picks.json (scan_to_room),
+                      intrinsics.json (calibrate_intrinsics), camera.json + camera_ref.jpg +
+                      camera_overlay.jpg (register_camera), checks.json + check_pixels.json
+                      (check_room). From recall: surfaces.json. Git-ignored: xyz_map.npy (H×W×3
+                      world point per pixel, NaN = no hit; a cache) and the surfaces previews
+                      (surfaces_drawn.jpg, surfaces.png, surfaces_camera.jpg)
 *.pt, mobileclip*.ts  model weights in the repo root (git-ignored; downloaded once)
 ```
 
 **World frame (Part E):** meters, **Y-up**, **floor at y = 0**, origin at a taped room
 corner, axes along the walls. Every 3D number in the system is in this frame.
 
-**Data shapes** — dataclasses in `recall/models.py`; `to_dict()` is exactly the JSON on disk.
+**Data shapes** — DESIGN §7's seams, as dataclasses in `recall/models.py`; `to_dict()` is exactly
+the JSON on disk. Fields beyond DESIGN §7 are kept for the rules and replay (name, status, …).
 ```python
-Sighting   = {cam, object_id, bbox[x1,y1,x2,y2], score, ts}
-Zone       = {cam, name, box[x1,y1,x2,y2], prep, source}          # prep: "on" | "in" | ...
-WorldState = {object_id: {name, zone, status, confidence, since, last_observed,
-                          container, last_cam, last_bbox, xyz, still_path,
-                          misses, pending_zone, pending_count, context}}   # ObjectState
+Sighting   = {object, bbox[x1,y1,x2,y2], score, ts, cam}           # object = the item id
+Surface    = {name, box_min[x,y,z], box_max[x,y,z], prep, top}     # data/room/surfaces.json
+             # top: the surface's height (y); a hand-made box without it: box_min's y
+Zone       = {name, box[x1,y1,x2,y2], prep, source, cam}           # data/zones.json (fallback)
+WorldState = {object: {object, name, xyz, surface, status, confidence, since, last_observed,
+                       container, last_cam, last_bbox, photo_path,
+                       misses, pending_surface, pending_count, context}}   # ObjectState
              # status: observed | inferred | unknown   (never seen = last_observed None)
-Transition = {object_id, name, kind, from_zone, to_zone, status, container,
-              confidence, ts, time, still_path}
+             # surface: the place's name (a scanned surface, or an image zone before Part E)
+Transition = {object, name, kind, from_surface, to_surface, from_xyz, to_xyz, status,
+              container, confidence, ts, time, photo_path}
              # kind: appeared | reappeared | moved | disappeared | inferred_contained
-Answer     = {text, status, confidence, still_path, as_of}
+Answer     = {text, status, confidence, photo_path, as_of}
              # as_of: null while the camera is live; else when the world froze
 ```
 
@@ -111,7 +126,7 @@ Answer     = {text, status, confidence, still_path, as_of}
 | bag (container) | **not blue** — brown paper bag or yellow/green tote, wide opening | set when chosen | the only container |
 
 - Background-removed photos: `data/reference/{keys,glasses,remote,wallet}.png`. Bag photo still needed.
-- **No magenta/pink props** — magenta is the band marker colour (DESIGN §7).
+- **No magenta/pink props** — magenta is the band marker colour (DESIGN §4.2, `MARKER_HSV` in §9).
 - **No two props with the same colour or silhouette.** No other lanyards/badges on the demo surface.
 - **Surface:** the home table is glass with lace placemats. Lace is fine for contrast but busy;
   bare glass reflects and scans badly. Prefer a plain white/solid cloth over the demo area.
@@ -178,8 +193,35 @@ is the fallback (§8, task 6).
 
 ---
 
-## 4. Part B — Zones (built)
+## 4. Part B — Places: surfaces and zones (built)
 
+The household's words for where things are. **One kind is active at a time** (`recall/places.py`);
+`live.py` logs which at startup. **Switching kinds** (running on zones, then registering the room and
+naming surfaces) leaves the zone names in `state.json`: `live.py` warns, and each object logs a
+`moved` to its surface name the next time it's seen. To start clean, reset the memory before the
+first run on surfaces: delete `data/state.json`, `data/events.jsonl`, `data/heartbeat.json` and
+`data/photos/` (§10).
+
+**Surfaces (DESIGN §6.1)** — once the room is registered (`data/room/camera.json`) and named:
+```bash
+python -m recall.surfaces name   # drag boxes on data/room/plan.png, name them in the terminal
+python -m recall.surfaces show   # surfaces.png (the plan) + surfaces_camera.jpg (camera_ref.jpg)
+python -m recall.surfaces list
+```
+- A surface is a box in the world frame: the dragged rectangle on the plan, from 10 cm under the
+  scan's height there to 60 cm over it. The height (`top`, saved with the box) is the busiest level
+  under the rectangle, looking down as the plan is drawn; a raised level holding ≥ 25% of it beats
+  the floor, so a rectangle dragged a little loose around a table still gets the table's height.
+  The terminal shows each top ("top at 0.35 m", "(the floor)") before you name it.
+- An object's place = the surface holding `xyz` (the map point under its box's base), 5 cm margin.
+  Where boxes overlap, the **highest surface wins** (the sofa seat, not the floor box dragged into
+  it), then, among surfaces within 10 cm of that height, the **smallest** (a tray on a counter).
+  No map point, or in no box → `None`.
+- Check the boxes with `show`: on `surfaces_camera.jpg` each top outline must sit on its furniture,
+  with its name inside it. Outlines are drawn only where the lens model holds (no further off-axis
+  than the image corners), so a surface out of view never shows up at the image edge.
+
+**Image zones** — before Part E, or with no `surfaces.json`:
 ```bash
 python -m recall.zones onboard   # detect furniture, confirm/rename/delete, optional manual boxes
 python -m recall.zones manual    # draw boxes only (fallback that always works)
@@ -187,10 +229,10 @@ python -m recall.zones show      # overlay on live feed
 python -m recall.zones list
 ```
 - An object's zone = the zone containing its **base point** (bottom-centre of its box),
-  10 px margin, **smallest zone wins** (a tray on a counter).
-- No zone → `None`, rendered as "not in a named area".
-- When Part E lands, zones can optionally become 3D boxes on the mesh (point-in-box on
-  `xyz`). Keep the image-space version as the fallback.
+  10 px margin, **smallest zone wins**.
+
+No place → `None`, rendered as "not in a named area". Names must be unique (answers find them by
+name); the preposition ("on", "in") words the answers.
 
 ---
 
@@ -205,7 +247,7 @@ python -m recall.live --src demo.mp4 --snapshots data/shots        # every pass'
 python -m recall.live --src demo.mp4 -v --set CONTAIN_OVERLAP=0.2 --set MISSING_AFTER_K=4
                                                   # tune: -v logs every pass with its change fraction
 ```
-**Threads** (`pipeline.py`, DESIGN §7.1 rule 1): capture keeps only the newest frame; detection
+**Threads** (`pipeline.py`, DESIGN §9.1 rule 1): capture keeps only the newest frame; detection
 runs on its own thread once per `LOOP_S` and never blocks capture; the main thread only draws
 the window, which shows the boxes coloured by memory status (green observed, amber inferred,
 red unknown) and a panel of what the memory believes per item. Ctrl-C (or SIGTERM) stops detection after its current pass, joins the capture
@@ -228,23 +270,28 @@ detection ran on**.
 `"person"`. Person boxes are reported, never tracked. `DETECT_DEVICE` empty = the Apple GPU (MPS)
 when present — ultralytics never picks it by itself (20 vs 69 ms for YOLO-World @640 on the M4).
 
-**Memory rules** (`memory.py`, DESIGN §6 with these specifics):
+**Memory rules** (`memory.py`; DESIGN §8, with these specifics):
 
 | Situation | Rule |
 |---|---|
 | First sighting | commit `appeared` immediately |
-| Seen in a different zone | commit `moved` only after `MOVE_CONFIRM_N` (2) consecutive looks; **+1** if the new zone is `None` (objects in mid-air while carried) |
+| Seen in a different place | commit `moved` only after `MOVE_CONFIRM_N` (2) consecutive looks; **+1** if the new place is `None` (objects in mid-air while carried) |
 | Not seen | `misses += 1`; at `MISSING_AFTER_K` (3) → gone |
-| Gone, and its last box was ≥ `CONTAIN_OVERLAP` inside an enrolled **container's** box in that same frame | commit `inferred_contained`, status `inferred`, zone = container's zone, confidence clipped 0.5–0.9 |
-| Gone, no container | commit `disappeared`, status `unknown`, zone kept as last-known |
+| Gone, and its last box was ≥ `CONTAIN_OVERLAP` inside an enrolled **container's** box in that same frame | commit `inferred_contained`, status `inferred`, place and `xyz` = the container's, confidence clipped 0.5–0.9 |
+| Gone, no container | commit `disappeared`, status `unknown`, place and `xyz` kept as last-known |
 | Container moves | every item inferred inside it moves too (`moved`, still inferred; takes the container's `xyz`) |
 | Seen again after gone | commit `reappeared`, status `observed`, container cleared |
 | Always | never promote `inferred` → `observed` except by actually seeing it |
 
-`CONTAIN_OVERLAP` is **fraction of the object's box inside the container box**, not IoU —
-IoU of small glasses vs a big bag is tiny even when they're fully inside.
+`CONTAIN_OVERLAP` is **fraction of the object's box inside the container box**, not IoU (DESIGN §9
+still says IoU) — IoU of small glasses vs a big bag is tiny even when they're fully inside.
+Containment stays a 2D question in the pixels of the last frame, as DESIGN §8 says.
 
-**Output:** each transition logs an event line (and gets a still); `-v` also logs every
+**Positions:** `xyz` is the map point under the box's base (`pixel_to_world`, DESIGN §4.1). It follows
+the committed belief: while a move waits for confirmation the stored `xyz` stays put, and a
+transition carries both ends (`from_xyz`, `to_xyz`).
+
+**Output:** each transition logs an event line (and gets a photo); `-v` also logs every
 detection pass (`[change 0.012] seen: keys@kitchen counter 0.41, ...`). The state table is
 logged on exit.
 
@@ -273,8 +320,8 @@ Answer templates (`Query.where_is`):
 
 | Status | Answer |
 |---|---|
-| observed, zone | "Your keys are on the kitchen counter — seen just now." |
-| observed, no zone | "Your wallet is in view, but not in a named area — seen 2 minutes ago." |
+| observed, a place | "Your keys are on the kitchen counter — seen just now." |
+| observed, no place | "Your wallet is in view, but not in a named area — seen 2 minutes ago." |
 | inferred, container visible | "Your glasses are probably in the bag, on the table — inferred, last seen going in 4 minutes ago." |
 | inferred, container gone | "…probably in the bag, but I've lost track of the bag too. They went in at 2:12 PM." |
 | unknown | "Last seen on the table at 2:40 PM. I haven't seen them since." |
@@ -282,69 +329,79 @@ Answer templates (`Query.where_is`):
 
 ---
 
-## 7. Part E — Mesh + camera registration (built; waiting on Person A's `data/room/`)
+## 7. Part E — The scanned room (Person A's setup tools + the runtime bridge)
 
-Goal: the camera "lives" inside the room model. One function, `pixel_to_world(u, v)`, is
-the whole handoff — `live.py` passes it to `Memory(..., pixel_to_world=fn)` as soon as
-`data/room/camera.json` exists, and `xyz` fills in. File formats: `handoffAB.md` (on `main`).
+The camera "lives" inside the scan. Setup (DESIGN §1, done once by Person A / the care partner)
+writes `data/room/`; at runtime `recall/room.py` reads it and gives the live loop one function,
+`pixel_to_world(u, v)`, so every sighting gets an `xyz` and a surface. File formats: handoffAB.md.
+The setup tools are `uv` scripts with their own environment (Python ≤ 3.12, open3d 0.19, trimesh);
+the shared geometry and conventions live in `tools/roomlib.py`, and what's printed in
+`tools/printed.py` (markers: ArUco `DICT_4X4_50` ids 0–5, 18 cm nominal; lens board: ChArUco
+`DICT_5X5_100`, 7×5 squares of 3.5 cm).
 
-**Try the whole chain on a synthetic room** (known ground truth; also what the tests use):
-```bash
-python -m tools.synthetic_room --out data/room_synthetic       # box room + table, 4 markers, renders
-python -m tools.calibrate_intrinsics --room data/room_synthetic --images data/room_synthetic/boards
-python -m tools.register_camera --room data/room_synthetic --images data/room_synthetic/frames \
-    --test-pixel far_corner_floor=625.4,246.4 --test-pixel mid_floor=725.3,445.7
-open data/room_synthetic/check_overlay.jpg                      # mesh edges + markers on the frame
-```
-Synthetic result: 19/19 checks pass with the *calibrated* K — centre 2.8 cm from the "tape",
-rms 0.21 px, floor hits ≤ 0.3 cm, jitter 0.005°.
+**State of `data/room/` (delivered on the 3ddesign branch):**
+- `room.glb` (56k triangles, Y up, floor at y = 0), `markers.json` (markers 0, 3, 4, 5 on the floor
+  and two walls, 16.8 cm measured; every corner within 1 mm of the mesh, which holds by
+  construction: corners are cast onto it), `plan.png`, `scan_report.json` — **good**: the frame
+  checks pass and `recall/room.py` lands on the markers within 1 cm with a known pose
+  (`tests/test_room.py`). **But** `scan_report.json` warns that the corners of markers 0, 3 and 4
+  spread 20, 24 and 36 mm across sightings (warning above 10 mm; marker 4 rests on 10 sightings,
+  marker 3 on 7), so they may sit ~1 cm off along the surface. Edge lengths are within 0.6% of the
+  print (marker 5: 1.1% short). E3's `rms_px` and E4 will show whether a rescan with more, closer
+  sightings of those markers is needed.
+- `intrinsics.json` — **redo it before registering.** `cy = −249 px` (the principal point is
+  above the 720 px image; it should be near 360) and `fy/fx = 1.18` (webcams are ≈ 1.0); the
+  0.68 px rms only means the fit matched the views it saw. Re-run E2 with the board in every
+  part of the frame, corners included, and tilted.
+- `checks.json` — `lens_measured` z = 5.52 m is 1.4 m past the scanned area (z ≤ 4.10 m): fine only
+  if the camera really is behind the scanned part; `test_points` is empty, so the floor checks
+  can't run yet.
+- No `camera.json` yet (E3).
 
-### E1. Scan → mesh
-- **Prep:** demo lighting; clear clutter; cover glass tabletops (LiDAR scans glass badly); tape **3–4 printed ArUco markers** (DICT_4X4_50,
-  ~15 cm) on floor/wall where the corner camera sees them; tape-mark the origin corner.
-  (handoffAB.md says the markers stay up through the demo; if they come down, re-registration
-  after a bump needs them taped back in the same spots.)
-- **Scan:** iPhone Pro LiDAR in Polycam or Scaniverse (LiDAR mode) → export `.glb`.
-  No LiDAR: phone video → MapAnything (metric) → point cloud → Open3D Poisson → mesh.
-- **Clean (Blender/MeshLab):** crop, decimate to ~200k tris, translate/rotate so floor
-  y = 0, origin at the taped corner, axes along walls.
-- **Accept:** a tape-measured distance (wall to wall) matches the mesh within ~2%.
+### E1. Scan → map + markers — `uv run tools/scan_to_room.py data/room/scan_raw --marker-size 0.168`
+Markers up first (≥ 3, floor **and** a wall the camera faces; **they stay up**). Polycam LiDAR mode,
+Developer mode on, Export → Raw data. The tool checks the export against its own LiDAR depth,
+finds the markers in the keyframes, asks for three clicks (the taped corner, a floor point along
+each wall), and writes `room.glb`, `markers.json`, `plan.png` (top-down, 100 px/m, origin and
+axes drawn) and `scan_report.json`.
 
-### E2. Intrinsics — `tools/calibrate_intrinsics.py`
-- Lock camera resolution (1280×720), autofocus, exposure, white balance.
-- Checkerboard (9×6 inner corners), ~15 views → `cv2.calibrateCamera` → K, dist.
-- Emergency fallback: `fx = fy = (W/2)/tan(HFOV/2)`, centre principal point, zero dist.
+### E2. Lens — `uv run tools/calibrate_intrinsics.py --camera <name>`
+`printables/calibration_board.pdf` (ChArUco), mounted flat, ~20 views at 1280×720: near, far,
+tilted, and in every part of the frame. Frames are kept automatically; c calibrates →
+`intrinsics.json`. Redo whenever resolution, focus or zoom change.
 
-### E3. Pose — `tools/register_camera.py`
-1. **ArUco (primary):** one-time, click each marker's 4 corners on the mesh (Open3D
-   `VisualizerWithEditing`) → 3D corners in `data/room/markers.json`. Then detect markers in the
-   camera frame (`cv2.aruco`) → `solvePnPRansac` → `solvePnPRefineLM` → R, t.
-2. **Manual (fallback):** click 8–12 matching points (room/counter/door corners), spread
-   across depth and height, image ↔ mesh, solve the same way.
-3. **Tape check:** measure the lens position from the origin corner; camera centre
-   `−Rᵀt` must be within ~5 cm.
-- **Verify:** project subsampled mesh vertices with `cv2.projectPoints` onto the live frame;
-  edges must line up. Mean reprojection error **< 3–5 px**.
-- **Output:** `data/room/camera.json` = `{width, height, K, dist, R, t, camera_center, rms_px,
-  markers_used, registered_at}` + `camera_ref.jpg` (median frame) + `check_overlay.jpg`.
-- Re-registration after a bump = re-run step 1 (no clicking).
+### E3. Pose — `uv run tools/register_camera.py --camera <name>`
+Watches the markers ~2 s, matches their corners to `markers.json`, `solvePnPRansac` +
+`solvePnPRefineLM` → `camera.json` (`{width, height, K, dist, R, t, camera_center, rms_px,
+markers_used, registered_at}`), `camera_ref.jpg` and `camera_overlay.jpg` (detected corners, the
+markers and the mesh drawn where the pose puts them: they must sit on the real ones).
+**Camera bumped:** re-run E3 — the markers are still up, no clicking.
 
-```bash
-python -m tools.calibrate_intrinsics --room data/room --src 0      # SPACE per board view, ESC solves (≥10)
-python -m tools.calibrate_intrinsics --room data/room --hfov 75    # emergency: no checkerboard
-python -m tools.register_camera --room data/room --src 0           # ~30 frames averaged; click the 2 test objects
-python -m tools.register_camera --room data/room --check-only      # re-run the acceptance table
-```
-New intrinsics drop the old pose from `camera.json` (it's invalid with a new K). Registration
-pools each marker's corners over all frames, solves `solvePnPRansac` → `solvePnPRefineLM`, and
-reports per-frame jitter so a bumped or vibrating camera shows up. It then prints the handoff
-acceptance table (PASS/FAIL + likely cause): scale (with `--wall-to-wall-x/-z`), rms < 5 px,
-centre vs tape < 5 cm, floor_hit / pixel_to_world on `mid_floor` < 5 cm and `far_corner_floor`
-< 10 cm, projected test points < 5 px, plus sanity checks (det R = +1, markers in front and
-on their printed side, camera upright and inside the walls, mesh Y-up with floor at y = 0,
-markers.json corners on the mesh, and the ARKit/GL ↔ OpenCV round trip).
+**Fallback when E1 stops at step 2** (`FAIL: no reading lines the mesh up with LiDAR depth`, and
+DESIGN §1.1 / §11 send you here): the markers can't be found in the keyframes, so their corners
+are clicked on the mesh by hand. **No tool does this yet** (Person A); the pieces are in
+`tools/roomlib.py`. Set the world frame from three clicks as E1 step 4 does (`pick_points` → a room
+corner on the floor and a point on each wall → `world_from_clicks`) and write `room.glb` in it; then
+for each marker shift-click its 4 corners (`pick_points(mesh, 4, ...)`) in OpenCV's order —
+top-left, top-right, bottom-right, bottom-left, looking at the marker upright — move them into the
+world frame (`transform`) and write `markers.json` in handoffAB.md §2's format. Then E3 as usual.
 
-### E4. `recall/room.py` — the bridge
+### E4. Check — `uv run tools/check_room.py [--wall-to-wall 4.12]`
+The handoff acceptance table: rms < 5 px, camera centre within 5 cm of the tape, `floor_hit` on the
+`checks.json` test objects within 5 cm (mid) / 10 cm (far corner), scale within 2%. You click each
+test object's base in `camera_ref.jpg` once (kept in `check_pixels.json`).
+
+| If it fails | Likely cause |
+|---|---|
+| Same offset everywhere | mesh origin / axes |
+| Error grows with distance | scale, or the focal length in K |
+| Error grows toward the image edges | distortion not applied |
+| Mirrored, or the camera behind a wall | marker corner order, or the OpenCV vs Y-up flip |
+| Good in the middle, bad in a corner | too few markers on that side |
+
+### E5. Surfaces — `python -m recall.surfaces name` (§4)
+
+### E6. `recall/room.py` — the runtime bridge (handoffAB.md "What B does")
 ```python
 room = Room.load("data/room")             # camera.json (needs R, t) + room.glb (optional)
 room.pixel_to_world(u, v) -> (x, y, z) | None   # exact first hit along the pixel's ray (Open3D)
@@ -353,31 +410,21 @@ room.world_to_pixel(x, y, z) -> (u, v)          # cv2.projectPoints, for overlay
 room.xyz_map                                    # H×W×3, cached to data/room/xyz_map.npy (+ .sha1)
 opencv_to_gl(R, t) / gl_to_opencv(T)            # ARKit/three.js camera axes = OpenCV · diag(1,−1,−1)
 ```
-Pixels are undistorted with a tight criteria (the default 5 iterations are off by pixels at the
-image edges) and pixels where the fitted lens model has no inverse return `None` (warned at load).
-Without `room.glb` every pixel lands on the floor plane; if Open3D can't read the mesh, the cached
-`xyz_map.npy` is used. Rays start 20 cm out, past the webcam's own mount if it was scanned.
-A bad `data/room/` never stops the demo: `live.py` warns and runs without `xyz`.
+Reads the mesh the way the setup tools do (trimesh, nodes merged, transforms baked) and uses
+`roomlib`'s conventions; `tests/test_room.py` checks it against `roomlib.project`, `floor_hit` and
+`solve_pose` on the real scan. Pixels are undistorted with a tight criteria (the default 5
+iterations are off at the image edges). Without `room.glb` (or without trimesh to read it)
+everything lands on the floor plane: `xyz` stays on (`source=floor` in the log) but places fall
+back to image zones, since every surface would be wrong. A bad `data/room/` never stops the demo —
+`live.py` warns and runs with image zones and no `xyz`. So does a `camera.json` registered at
+another size than `CAPTURE_W`×`CAPTURE_H` (logged as an error): the lens calibration only holds at
+its own size (DESIGN §9), so capture at that size, or calibrate and register again (E2, E3).
 
-### E5. Viewer (optional, care-partner page)
+### E7. Viewer (optional, care-partner page)
 three.js / React Three Fiber: load `room.glb`, place a virtual camera at R, t with FOV from
 K (OpenCV → three.js: multiply camera axes by `diag(1, −1, −1)`), blend the live frame over
 the render, pin each object at `xyz`, flash the last-seen spot. Projected video:
 `three-projected-material`.
-
-### E6. Sanity check (acceptance for Part E)
-- Object **A** on the floor in the **far** corner the camera sees; object **B** mid-floor.
-- Tape-measure both (x, z) from the origin corner.
-- `floor_hit` on each object's clicked base pixel → B within **~5 cm**, A within **~10 cm**.
-- `world_to_pixel` of the tape points lands on the objects within a few px.
-
-| Symptom | Cause |
-|---|---|
-| Same offset everywhere | mesh origin/axes (E1 clean-up) |
-| Error grows with distance | scale or focal length |
-| Error grows toward image edges | distortion not applied |
-| Mirrored / behind camera | OpenCV vs Y-up axis flip, or a mis-clicked pair |
-| Good in middle, bad in corner | too few correspondences on that side |
 
 ---
 
@@ -388,13 +435,13 @@ Nothing starts before the task above it passes its check.
 | # | Task | Done when |
 |---|---|---|
 | 0 | **Range test** (`python -m tools.range_test capture`): camera at its demo position, all props + bag at near / mid / far stations; compares `yolo-world` vs `yoloe` × imgsz 640 / 1280 on the same frames (re-run offline with `eval`) | Every prop seen in ≥ 90% of each burst at every station, right label (check `data/range_test/report/`), within budget → `DETECTOR` + `DETECT_IMGSZ` chosen |
-| 1 | **Run A–D on the real camera.** `pip install -r requirements.txt`; detector ms/frame (range test prints it); `enroll calibrate`; `zones onboard`; `live --show` | All props (keys, glasses, remote, wallet, bag) detected with the right label in demo lighting; detector < 150 ms/frame |
+| 1 | **Run A–D on the real camera.** `pip install -r requirements.txt`; detector ms/frame (range test prints it); `enroll calibrate`; places: `surfaces name` once the room is registered, else `zones onboard`; `live --show` | All props (keys, glasses, remote, wallet, bag) detected with the right label in demo lighting; detector < 150 ms/frame |
 | 2 | **Record a demo video** (`python -m tools.record data/demo1.mp4`, script below; refuses to overwrite without `--force`) and replay with `--src` | Event log matches what happened, no phantom moves from a hand passing over |
 | 3 | **Tune** `LOOP_S`, `MISSING_AFTER_K`, `MOVE_CONFIRM_N`, `CHANGE_FRACTION`, `CONTAIN_OVERLAP`, per-item `min_score`, prompts on those videos (`python -m tools.tune`, below) | Glasses→bag inferred every run; hand-over-object produces no `disappeared` |
-| 4 | **HTTP surface** (`recall/api.py`, FastAPI, **one uvicorn worker**): `GET /state`, `GET /objects/{id}/history`, `GET /changes?since=`, `POST /ask {text}`, `GET /stills/{path}`, `GET /stream` (MJPEG) — thin wrappers over `query.py` | care-partner page and voice layer can call it |
-| 5 | **Part E** E1→E4, then E6 | sanity check passes; `state.json` shows `xyz` |
+| 4 | **HTTP surface** (`recall/api.py`, FastAPI, **one uvicorn worker**), DESIGN §7: `GET /state`, `GET /changes?since=today`, `POST /ask {text}`, `GET /stream/{cam}` (MJPEG) — thin wrappers over `query.py`. (`GET /proximity` belongs to the wrist tracker, DESIGN §4.2. Open: DESIGN lists no route for the photos behind `photo_path`.) | care-partner page and voice layer can call it |
+| 5 | **Part E** (Person A): E2 again (the lens), E3, E4; then E5 surfaces (reset the memory first, §4) | `check_room.py` passes; `state.json` shows `xyz` and surface names |
 | 6 | **Only if identity swaps:** re-id — embed `data/enroll/` crops (camera view, preferred) and `data/reference/` cutouts (phone photos, starting point) with CLIP via `open_clip`, accept a detection only if cosine ≥ 0.80 to its item, hold 0.60–0.80 | no swaps on the demo video |
-| 7 | **Only if time:** E5 viewer | pins on the mesh at the right spots |
+| 7 | **Only if time:** E7 viewer | pins on the mesh at the right spots |
 
 Do **not** add: a database (stay on JSON/JSONL), an LLM query layer, a second camera,
 evidence clips, alerts. (PLAN §8.)
@@ -404,8 +451,8 @@ evidence clips, alerts. (PLAN §8.)
 Record **3 takes** of the same script (`python -m tools.record data/demo1.mp4`, `demo2`, `demo3`),
 varying hand speed and where the glasses land in the bag — "every run" in task 3 means every take.
 After each action take your hands fully out of frame and **wait the stated time** (the memory needs
-`MOVE_CONFIRM_N` / `MISSING_AFTER_K` looks at one per second). Zone names below are examples: use
-yours from `python -m recall.zones list`.
+`MOVE_CONFIRM_N` / `MISSING_AFTER_K` looks at one per second). Place names below are examples: use
+yours from `python -m recall.surfaces list` (room registered) or `python -m recall.zones list`.
 
 | Step | Action | Wait | Expected event |
 |---|---|---|---|
@@ -439,8 +486,8 @@ It prints one row per combination (missing/phantom events per take), the best ro
 expectation, and the `--set` flags to use live. Without `--expect` it prints each take's events in
 expect-file format, ready to check and save.
 
-The matching expectation file (`data/demo.expect`, one file for every take; `#` = comment; zone
-names must match `zones.json` exactly — the tool rejects unknown items and zones):
+The matching expectation file (`data/demo.expect`, one file for every take; `#` = comment; place
+names must match `surfaces.json` / `zones.json` exactly — the tool rejects unknown items and places):
 ```
 appeared keys table
 appeared glasses table
@@ -475,13 +522,14 @@ case-insensitive) or an environment variable `RECALL_NAME=VALUE`; precedence def
 | `SETTLE_S` / `HEARTBEAT_S` | 5 / 20 s | SETTLE must exceed `MISSING_AFTER_K × LOOP_S` |
 | `DETECTOR` | yolo-world | yolo-world \| yoloe \| yolo (fine-tuned) — §2b |
 | `DETECT_MODEL` | (empty) | empty = the backend's default weights; required for `yolo` |
-| `DETECT_IMGSZ` | 640 | task 0 decides 640 vs 1280 |
+| `DETECT_IMGSZ` | 1280 | DESIGN §9: 640 loses small objects past ~2 m; task 0 confirms (YOLOE @1280 is ~210 ms) |
 | `DETECT_DEVICE` | (empty) | empty = `mps` on Apple silicon; or `cpu` |
 | `DEFAULT_MIN_SCORE` | 0.15 | open-vocabulary scores run low; calibration overrides per item |
 | `MISSING_AFTER_K` | 3 | looks before "gone" |
-| `MOVE_CONFIRM_N` | 2 | +1 for the no-zone case |
+| `MOVE_CONFIRM_N` | 2 | +1 for the no-place case |
 | `CONTAIN_OVERLAP` | 0.25 | fraction of object box inside container box |
-| `ZONE_MARGIN_PX` | 10 | base point may sit this far outside a zone box |
+| `ZONE_MARGIN_PX` | 10 | base point may sit this far outside a zone box (image zones) |
+| `SURFACE_MARGIN_M` | 0.05 | `xyz` may sit this far outside a surface box (scanned surfaces) |
 | `REID_ACCEPT` / `REID_HOLD` | 0.80 / 0.60 | task 6 only, when an identity check is plugged in |
 
 ---
@@ -495,6 +543,9 @@ case-insensitive) or an environment variable `RECALL_NAME=VALUE`; precedence def
   `CERTIFICATE_VERIFY_FAILED`. Run `export SSL_CERT_FILE=$(.venv/bin/python -m certifi)` first (or
   "Install Certificates.command" in `/Applications/Python 3.11/`).
 - **Python 3.11 venv** (`python3.11 -m venv .venv`): open3d (Part E) has no wheels for 3.13+/3.14.
+- **Two environments:** `recall` and `python -m tools.*` run in `.venv`; Person A's setup tools
+  (`scan_to_room`, `calibrate_intrinsics`, `register_camera`, `check_room`) are `uv run` scripts that
+  build their own (Python ≤ 3.12, open3d 0.19, trimesh). Their test also runs under the venv's pytest.
 - **One OpenCV wheel only** — `opencv-python` (ArUco is in core since 4.7). Having
   `opencv-contrib-python` installed too makes them overwrite each other's `cv2`.
 - **macOS:** grant the terminal camera permission; OpenCV windows must run on the main thread
@@ -505,44 +556,53 @@ case-insensitive) or an environment variable `RECALL_NAME=VALUE`; precedence def
 - **A hand on an object** is excluded from containment by construction — only enrolled
   containers count, and people are never enrolled.
 - **Interactive tools on macOS:** OpenCV windows only repaint inside `waitKey`, so while the terminal
-  asks for zone names the numbered picture opens in Preview instead (`data/zones_candidates.jpg`).
+  asks for zone or surface names the numbered picture opens in Preview instead
+  (`data/zones_candidates.jpg`, `data/room/surfaces_drawn.jpg`).
   q or ESC quits every window; Ctrl-C always closes windows and releases the camera; a quit or
   Ctrl-C mid-calibration keeps earlier items' calibration and the current item's accepted samples.
-- **Restart-safe:** state reloads from `state.json`; the log is append-only. Delete
-  `data/state.json`, `data/events.jsonl`, `data/stills/` and `data/heartbeat.json` to reset a
-  demo (keep `zones.json`, `enroll/`, `room/`).
+- **Restart-safe:** state reloads from `state.json`; the log is append-only. Files written before
+  the rename to DESIGN §7's names (`object_id`, `zone`, `still_path`, `stills/`) are read as the new
+  ones. Delete `data/state.json`, `data/events.jsonl`, `data/photos/` and `data/heartbeat.json` to
+  reset a demo (keep `zones.json`, `enroll/`, `room/`); also before the first run on surfaces (§4).
 
 ## 11. Layout
 
 ```
 items.json
 requirements.txt
-recall/                      DESIGN §4 component in brackets
+recall/                      DESIGN §6 component in brackets
   config.py      Settings: every tunable; env RECALL_* and --set NAME=VALUE
-  models.py      Item, Sighting, Zone, ObjectState, Transition, Answer (on-disk JSON shapes)
+  models.py      DESIGN §7 seams: Item, Sighting, Surface, Zone, ObjectState, Transition, Answer
   geometry.py    box math: overlap_frac (fraction inside), base_point, contains
   camera.py      CameraSource (capture thread, newest frame) · VideoSource (exact replay)  [Camera threads]
   gate.py        change gate
   perception.py  Detector interface: yolo-world | yoloe | yolo; re-id hook       [Perception]
-  zones.py       zone_at / zone_phrase + onboarding CLI                           [Zone map]
+  places.py      Places: surface_at(xyz) once registered, else zone_at(bbox); phrases   [Surfaces]
+  surfaces.py    surfaces.json + naming them on the scan's plan.png (CLI)
+  zones.py       image zones + onboarding CLI (the fallback places)
   memory.py      the §5 rules: sightings in, Transitions out                      [Change detection]
-  store.py       state.json / events.jsonl / stills / heartbeat.json             [Store]
+  store.py       state.json / events.jsonl / photos / heartbeat.json             [Store]
   query.py       Query: where_is / history / changes_since / state_at / diff; "as of" stamping
   ask.py         text → query routing + REPL (voice and POST /ask call handle())
   pipeline.py    the detection thread: stall check → gate → detect → memory
-  overlay.py     all drawing: window, stills, /stream, enroll, zones
+  overlay.py     all drawing: window, photos, /stream, enroll, zones, surfaces
   live.py        CLI: wires it together; window on the main thread; clean Ctrl-C
   enroll.py      items.json CLI + calibration
-  room.py        (E) camera.json + room.glb → pixel_to_world / floor_hit / world_to_pixel
+  room.py        (E) data/room/ → pixel_to_world / floor_hit / world_to_pixel   [Localizer]
   api.py         (task 4) FastAPI — to build
-tools/
+tools/           Part E setup (Person A; `uv run tools/<name>.py`):
+  scan_to_room.py         (E1) Polycam raw export -> room.glb, markers.json, plan.png
+  calibrate_intrinsics.py (E2) ChArUco board -> intrinsics.json
+  register_camera.py      (E3) markers -> camera.json, camera_ref.jpg, camera_overlay.jpg
+  check_room.py           (E4) the handoff acceptance table
+  roomlib.py, printed.py, webcam.py   shared geometry, what's printed, opening a camera by name
+                 Session tools (`python -m tools.<name>`):
   cameras.py              which index is the corner camera (one frame from each)
   range_test.py           task 0: detectors × imgsz at near/mid/far
   record.py               tasks 2–3: record the camera at a fixed frame rate for --src replays
   simulate.py             a scripted table from the reference cutouts → window, screenshots, test
   tune.py                 task 3: cache detections per take, replay gate + memory over a settings grid
-  synthetic_room.py       (E) fake data/room/ from known ground truth (tests)
-  calibrate_intrinsics.py (E2) checkerboard → K, dist
-  register_camera.py      (E3) ArUco → R, t + the handoff acceptance checks
-tests/           python -m pytest tests/   (no camera, no model download)
+scripts/         make_printables.py (markers + ChArUco board PDFs), range_test.py (walk-back hit rate)
+printables/      markers.pdf, calibration_board.pdf
+tests/           python -m pytest tests/   (no camera, no model download; test_room_tools.py is Person A's)
 ```
