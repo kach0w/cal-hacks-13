@@ -1,0 +1,27 @@
+{
+  "depth_median_m": 0.011373004120164065,
+  "marker_size_m": 0.168,
+  "markers": {
+    "0": {
+      "sightings": 24,
+      "spread_m": 0.0201
+    },
+    "3": {
+      "sightings": 7,
+      "spread_m": 0.024
+    },
+    "4": {
+      "sightings": 10,
+      "spread_m": 0.0365
+    },
+    "5": {
+      "sightings": 15,
+      "spread_m": 0.0063
+    }
+  },
+  "warnings": [
+    "marker 0's corners only agree to 20 mm across the scan",
+    "marker 3's corners only agree to 24 mm across the scan",
+    "marker 4's corners only agree to 36 mm across the scan"
+  ]
+}
