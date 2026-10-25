@@ -1,31 +1,27 @@
 {
-  "convention": "inverse alignment|c2w|arkit",
   "depth_median_m": 0.011373004120164065,
+  "marker_size_m": 0.168,
   "markers": {
     "0": {
       "sightings": 24,
-      "spread_m": 0.0201,
-      "edge_ratio": 0.9994
+      "spread_m": 0.0201
     },
     "3": {
       "sightings": 7,
-      "spread_m": 0.024,
-      "edge_ratio": 1.0006
+      "spread_m": 0.024
     },
     "4": {
       "sightings": 10,
-      "spread_m": 0.0365,
-      "edge_ratio": 1.0051
+      "spread_m": 0.0365
     },
     "5": {
       "sightings": 15,
-      "spread_m": 0.0063,
-      "edge_ratio": 0.9891
+      "spread_m": 0.0063
     }
   },
   "warnings": [
-    "marker 0 corners spread 20 mm across sightings",
-    "marker 3 corners spread 24 mm across sightings",
-    "marker 4 corners spread 36 mm across sightings"
+    "marker 0's corners only agree to 20 mm across the scan",
+    "marker 3's corners only agree to 24 mm across the scan",
+    "marker 4's corners only agree to 36 mm across the scan"
   ]
 }

@@ -24,27 +24,30 @@ def list_cameras():
     return [c["_name"] for c in cams]
 
 
-def open_camera(camera, width=WIDTH, height=HEIGHT, exact=False):
-    """exact=True exits unless the camera delivers exactly width x height."""
+def resolve_camera(camera):
+    """A name (substring is fine) or index -> (index, device name)."""
     names = list_cameras()
-    for i, name in enumerate(names):
-        print(f"  [{i}] {name}")
-
     if camera.isdigit():
         index = int(camera)
     else:
         matches = [i for i, n in enumerate(names) if camera.lower() in n.lower()]
         if len(matches) != 1:
-            sys.exit(f"'{camera}' matched {len(matches)} cameras; pass a name from the list or its index")
+            listing = "\n".join(f"  [{i}] {n}" for i, n in enumerate(names))
+            sys.exit(f"'{camera}' matched {len(matches)} cameras; pass a name or index from:\n{listing}")
         index = matches[0]
+    return index, names[index] if index < len(names) else f"camera {index}"
 
+
+def open_camera(camera, width=WIDTH, height=HEIGHT, exact=False):
+    """exact=True exits unless the camera delivers exactly width x height."""
+    index, name = resolve_camera(camera)
     cap = cv2.VideoCapture(index, cv2.CAP_AVFOUNDATION)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
     if not cap.isOpened():
         sys.exit(f"couldn't open camera {index} (check the terminal's camera permission)")
     w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    print(f"using [{index}] {names[index] if index < len(names) else '?'} at {w}x{h}")
+    print(f"using {name} at {w}x{h}")
     if exact and (w, h) != (width, height):
         sys.exit(f"camera gave {w}x{h}, need exactly {width}x{height}")
     return cap

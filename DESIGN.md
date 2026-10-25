@@ -27,64 +27,46 @@ Every number in §9 is a starting point to calibrate on the real rig, not a tune
 
 ## 1. Setup (once)
 
-Done by the care partner, never the person living there. About twenty minutes. The file
-contract is [handoffAB.md](./handoffAB.md); the tools are in `tools/`.
+Done by the care partner, never the person living there. Three things by hand, then one command.
 
-1. **Tape an L on the floor at one corner of the room.** That corner is the origin: metres,
-   Y up, floor at y = 0, X and Z along the two walls.
-2. **Put up at least 3 markers** (`printables/markers.pdf`: ArUco `DICT_4X4_50` ids 0–5, 18cm)
-   where the camera sees them face-on: on the floor **and** a wall it faces, near, middle and
-   far. **They stay up.** A marker on the wall the camera hangs on is seen edge-on and missed.
-3. **Scan** with a LiDAR iPhone: Polycam, **LiDAR mode** (not Room mode), Developer mode on
-   before scanning. Clear small objects first and pass within ~1m of each marker. Export → Raw
-   data → unzip into `data/room/scan_raw/`.
-4. **`tools/scan_to_room.py`** → `room.glb` + `markers.json` (§1.1). You click the taped corner
-   and a floor point along each wall.
-5. **`tools/calibrate_intrinsics.py`** → the webcam's lens (§1.2).
-6. **`tools/register_camera.py`** → `camera.json` + `camera_ref.jpg`: where the camera is (§1.2).
-7. **Tape-measure** the lens and two floor test points into `checks.json`, then
-   **`tools/check_room.py`** (§1.3).
-8. **Name the surfaces** (§6.1) and **list the objects** by name.
+1. **Put up markers** (`printables/markers.pdf`, ArUco `DICT_4X4_50` ids 0–5): at least 3 where
+   the webcam sees them face-on, on the floor **and** a wall it faces. They stay up. A marker on
+   the wall the webcam hangs on is seen edge-on and missed; one under glass isn't seen at all.
+2. **Scan** with a LiDAR iPhone in Polycam: **LiDAR mode**, Developer mode on before scanning.
+   One slow loop ending where it started, passing within ~1m of each marker. Export **Raw data**
+   (and **glTF** if the raw zip has no mesh) and drop the zip(s) into `data/room/`.
+3. **Webcam in its final spot**, at 1280×720.
+4. **`uv run tools/setup_room.py --camera brio`**
 
-**Camera bumped:** re-run step 6. The markers are still up, so there's no rescan and no clicking.
+That writes `data/room/` (handoffAB.md). The first time it meets a webcam it opens a guided
+lens calibration: hold the board (`printables/calibration_board.pdf`) 40–60cm away until the
+on-screen grid fills; it finishes by itself and is saved in `data/cameras/` for every later room.
 
-### 1.1 Markers into the map
+**Camera bumped:** re-run the command. **New scan:** drop the new zips in and re-run.
 
-The LiDAR measures depth; it can't read a marker. The phone's colour camera can. Polycam's raw
-export has every keyframe image with the phone's pose, in the same coordinates as the mesh,
-plus LiDAR depth. `scan_to_room.py`:
+### 1.1 What the command does
 
-1. **Checks the export lines up:** mesh depth against LiDAR depth, for every way of reading
-   Polycam's poses, keeping the one under 2cm. If none is, the export can't be trusted: click
-   marker corners on the mesh by hand instead (CAMERA.md E3).
-2. **Finds the markers** in every keyframe and casts each corner onto the mesh, taking the
-   median over sightings. Markers and mesh share coordinates by construction.
-3. **Sets the world frame** from your three clicks; the floor near the corner fixes y = 0.
-4. **Writes** `room.glb` (≤ 300k triangles, transforms baked), `markers.json`, and
-   `scan_report.json` (sightings, spread, marker edges vs printed size as a scale check).
+1. **Scan** (`scan_to_room.py`). Polycam's raw export has every keyframe image with the phone's
+   pose and LiDAR depth, in the mesh's coordinates.
+   - **Checks the export lines up:** mesh depth against LiDAR depth for every way of reading
+     Polycam's poses; keeps the one under 2cm.
+   - **Finds the markers** in every keyframe and casts each corner onto the mesh (median over
+     sightings), so markers and mesh share coordinates by construction. Their size comes from
+     the scan.
+   - **World frame, no clicks:** floor at y = 0 (the lowest broad flat surface), X and Z along
+     the walls (from the walls' orientation), origin at the corner of the floor's outline.
+   - **Writes** `room.glb`, `markers.json`, `plan.png` (top-down, with the axes), `scan_report.json`.
+2. **Lens** (`calibrate_intrinsics.py`): reused from `data/cameras/`, or calibrated once.
+3. **Webcam position** (`register_camera.py`): the webcam watches the markers for 2s;
+   `solvePnP` gives `R, t` (`X_cam = R·X_world + t`) and `camera_center = −Rᵀt`. Writes
+   `camera.json`, `camera_ref.jpg` and `camera_overlay.jpg`, which draws the markers and the scan
+   where that pose puts them: they should sit on the real ones.
 
-### 1.2 Registering the camera
+**Watch the axes.** ARKit cameras are y-up, looking down −z; OpenCV's are y-down, looking down
++z (`diag(1, −1, −1)`). The depth check in step 1 catches a wrong reading.
 
-Lens first (`K`, distortion): show the webcam the ChArUco board
-(`printables/calibration_board.pdf`) ~20 times, at 1280×720. Then the camera looks at the
-markers, whose corners are known in the map:
-
-```python
-R, t = solvePnP(corners from markers.json, the same corners in the image)   # X_cam = R·X_world + t
-camera_center = -Rᵀ t                                                        # the lens, in the room
-```
-
-Markers on the floor **and** a wall matter: points all on one plane give a much weaker pose.
-
-**Watch the axes.** ARKit cameras are y-up, looking down −z. OpenCV cameras are y-down,
-looking down +z. Convert with `diag(1, −1, −1)`. Getting this wrong mirrors the world without
-an error; step 1 of §1.1 catches it.
-
-### 1.3 Check it
-
-`check_room.py` runs the handoff's acceptance table: reprojection < 5px; camera within 5cm of
-the tape; a floor object within 5cm mid-room and 10cm in the far corner; scale within 2%. A 1°
-error is ~9cm at 5m.
+**Accuracy** comes from the markers. With 3 in view and the scan's ~2–3cm marker drift, floor
+positions are good to roughly 5–8cm; more markers in view and a single-loop scan tighten it.
 
 ---
 
@@ -353,7 +335,7 @@ Starting points, to calibrate on the rig.
 | `MARKER_HZ` | every frame (~30) | |
 | `MARKER_HSV` | H 145–165, S > 120, V > 80 | Magenta. **Not** on wood, skin, or any prop |
 | `MARKER_MIN_AREA` | 150 px | Rejects speckle |
-| `MARKERS` | ≥ 3 up, 18cm, ArUco `DICT_4X4_50` ids 0–5 | Floor and wall. Use the size measured off the print |
+| `MARKERS` | ≥ 3 in the webcam's view, ArUco `DICT_4X4_50` ids 0–5 | Floor and wall. Size is read from the scan |
 | `MOVE_MIN` | 0.10m | Smaller shifts aren't moves |
 | `D_FAR` | 3.0m | `closeness = 1 − clamp(distance / D_FAR)` |
 | `EMA_ALPHA` | 0.30 @ 30 Hz | ≈100ms time constant |
@@ -403,8 +385,8 @@ No websockets.
 
 | Component | How it fails | Mitigation |
 |---|---|---|
-| Setup | Axes wrong; world mirrored | `scan_to_room.py`'s depth check, then `check_room.py` (§1.3) |
-| Setup | Camera bumped | Re-run `register_camera.py`; the markers are still up |
+| Setup | Axes wrong; world mirrored | `scan_to_room.py`'s depth check; the overlay looks wrong |
+| Setup | Camera bumped | Re-run `setup_room.py`; the markers are still up |
 | Setup | Polycam's export doesn't line up with its own LiDAR | Click marker corners on the mesh (CAMERA.md E3); last resort, our own ARKit app |
 | Setup | A marker isn't detected by the camera | It's seen edge-on or too small: move it to a wall the camera faces, or closer |
 | Map | Furniture moved since the scan | Rescan (§2) |

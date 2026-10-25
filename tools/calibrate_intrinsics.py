@@ -3,20 +3,22 @@
 # requires-python = ">=3.10"
 # dependencies = ["opencv-python>=4.8", "pyobjc-framework-Cocoa; sys_platform == 'darwin'"]
 # ///
-"""Measure a webcam's lens (K, distortion) with the ChArUco board -> data/room/intrinsics.json.
+"""Measure a webcam's lens once -> data/cameras/<webcam>.json, reused in every room. Usually run by
+setup_room.py the first time it sees a webcam.
 
     uv run tools/calibrate_intrinsics.py --camera brio
-    uv run tools/calibrate_intrinsics.py --images data/room/calib_frames   # re-run on saved frames
+    uv run tools/calibrate_intrinsics.py --images data/room/calib_frames --name brio-101  # saved frames
 
-Hold printables/calibration_board.pdf, mounted flat, in front of the camera: near, far, tilted,
-and in every part of the frame, corners included. A frame is kept automatically when the board
-is clear and somewhere new. Press c to calibrate once ~20 are kept, q to quit.
+Hold printables/calibration_board.pdf, mounted flat, 40-60 cm from the webcam. The window shows a
+3x3 grid: move the board until every square has turned green, and tilt it in a few shots. It
+finishes by itself. Esc stops.
 
-Run at 1280x720 with the focus the camera will keep. Changing resolution, focus or zoom later
+Calibrate at 1280x720 with the focus the webcam will keep. Changing resolution, focus or zoom later
 invalidates this; exposure and white balance don't.
 """
 
 import argparse
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -25,15 +27,23 @@ import cv2
 import numpy as np
 
 from printed import BOARD_DICT, BOARD_MARKER_CM, BOARD_SQUARE_CM, BOARD_SQUARES
-from roomlib import DATA, bring_to_front, save_json
-from webcam import HEIGHT, WIDTH, open_camera
+from roomlib import CAMERAS, DATA, bring_to_front, save_json
+from webcam import HEIGHT, WIDTH, open_camera, resolve_camera
 
 MIN_CORNERS = 12  # of the board's 24 inner corners
-MIN_MOVE_PX = 60  # how far the board must move before another frame is kept
-TARGET_VIEWS = 20
+MIN_MOVE_PX = 60  # how far the board must move before another shot is kept
+GRID = 3
+MIN_TILTED = 4  # shots with the board tilted at least TILT_DEG; they're what pin down the focal length
+TILT_DEG = 20
+MIN_SHOTS = 15
 RMS_WARN_PX = 1.0
 OUTLIER_X = 2.0  # a view fitting this many times worse than the median is dropped
 MIN_VIEWS = 10
+
+
+def camera_file(name):
+    """data/cameras/<name>.json, e.g. 'Brio 101' -> brio-101.json."""
+    return CAMERAS / f"{re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')}.json"
 
 
 def make_board():
@@ -47,6 +57,14 @@ def find_board(detector, gray):
     if ids is None or len(ids) < MIN_CORNERS:
         return None
     return corners.reshape(-1, 1, 2).astype(np.float32), ids.reshape(-1, 1)  # one shape across OpenCV 4 and 5
+
+
+def tilt(board, view, size):
+    """Rough angle between the board and the image plane, in degrees, with a guessed lens."""
+    obj, img = board.matchImagePoints(*view)
+    K = np.array([[size[0], 0, size[0] / 2], [0, size[0], size[1] / 2], [0, 0, 1.0]])
+    ok, rvec, _ = cv2.solvePnP(obj, img, K, None, flags=cv2.SOLVEPNP_IPPE)
+    return float(np.degrees(np.arccos(abs(cv2.Rodrigues(rvec)[0][2, 2])))) if ok else 0.0
 
 
 def calibrate(board, views, size):
@@ -74,16 +92,17 @@ def calibrate(board, views, size):
         img = [i for i, b in zip(img, bad) if not b]
 
 
-def save(out, rms, K, dist, n, size):
+def save(out, name, rms, K, dist, n, size):
     save_json(out, {
-        "width": size[0], "height": size[1],
+        "camera": name, "width": size[0], "height": size[1],
         "K": np.round(K, 4).tolist(), "dist": np.round(dist, 6).tolist(),
         "rms_px": round(rms, 3), "views": n,
         "calibrated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
     })
-    print(f"reprojection error {rms:.2f} px over {n} views")
+    print(f"lens: fx {K[0, 0]:.0f}, fy {K[1, 1]:.0f}, centre ({K[0, 2]:.0f}, {K[1, 2]:.0f}); "
+          f"fit {rms:.2f} px over {n} shots")
     if rms > RMS_WARN_PX:
-        print(f"WARNING: above {RMS_WARN_PX} px. Board not flat, motion blur, or too few tilted views; redo")
+        print(f"WARNING: fit above {RMS_WARN_PX} px; the board may not be flat. Redo with --recalibrate")
 
 
 def from_images(folder, board, detector):
@@ -98,54 +117,88 @@ def from_images(folder, board, detector):
     return views, size
 
 
-def from_camera(camera, board, detector, keep_dir):
+def done(cells, tilted, shots):
+    return cells.all() and tilted >= MIN_TILTED and shots >= MIN_SHOTS
+
+
+def guided(camera, board, detector, keep_dir):
+    """Live view with a grid that fills in; returns the kept views once the grid, tilts and count are done."""
     keep_dir.mkdir(parents=True, exist_ok=True)
     cap = open_camera(camera, exact=True)
-    views, spots = [], []  # spots: (centre, size) of each kept view, to tell "somewhere new"
-    while True:
+    views, spots, cells, tilted = [], [], np.zeros((GRID, GRID), bool), 0
+    raised = False
+    while not done(cells, tilted, len(views)):
         ok, frame = cap.read()
         if not ok:
             sys.exit("camera stopped returning frames")
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        found = find_board(detector, gray)
+        found = find_board(detector, cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
         view = frame.copy()
         if found is not None:
             pts = found[0].reshape(-1, 2)
-            spot = np.r_[pts.mean(axis=0), np.ptp(pts, axis=0).mean()]
+            centre = pts.mean(axis=0)
+            spot = np.r_[centre, np.ptp(pts, axis=0).mean()]
             if all(np.abs(spot - s).sum() > MIN_MOVE_PX for s in spots):
                 spots.append(spot)
                 views.append(found)
+                cells[min(int(centre[1] * GRID / HEIGHT), GRID - 1), min(int(centre[0] * GRID / WIDTH), GRID - 1)] = True
+                tilted += tilt(board, found, (WIDTH, HEIGHT)) >= TILT_DEG
                 cv2.imwrite(str(keep_dir / f"{len(views):02d}.png"), frame)
             cv2.aruco.drawDetectedCornersCharuco(view, found[0], found[1], (0, 255, 0))
-        cv2.putText(view, f"kept {len(views)}/{TARGET_VIEWS}   c: calibrate   q: quit", (20, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
+
+        shade = view.copy()
+        for r in range(GRID):
+            for c in range(GRID):
+                p1 = (c * WIDTH // GRID, r * HEIGHT // GRID)
+                p2 = ((c + 1) * WIDTH // GRID, (r + 1) * HEIGHT // GRID)
+                if cells[r, c]:
+                    cv2.rectangle(shade, p1, p2, (0, 200, 0), -1)
+                cv2.rectangle(view, p1, p2, (200, 200, 200), 1)
+        view = cv2.addWeighted(shade, 0.25, view, 0.75, 0)
+        for i, line in enumerate((
+            "Move the board into every square, and tilt it in a few shots. Finishes by itself.",
+            f"squares {cells.sum()}/{GRID * GRID}   tilted {min(tilted, MIN_TILTED)}/{MIN_TILTED}   "
+            f"shots {len(views)}/{MIN_SHOTS}   (Esc stops)",
+        )):
+            cv2.putText(view, line, (16, 34 + 30 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 0), 4)
+            cv2.putText(view, line, (16, 34 + 30 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 255), 2)
         cv2.imshow("calibrate", view)
-        if not views and not spots:
+        if not raised:
             bring_to_front()
-        key = cv2.waitKey(1) & 0xFF
-        if key in (ord("q"), 27):
-            sys.exit("quit without calibrating")
-        if key == ord("c"):
-            cap.release()
-            cv2.destroyAllWindows()
-            return views, (WIDTH, HEIGHT)
+            raised = True
+        if cv2.waitKey(1) & 0xFF == 27:
+            sys.exit("stopped before the grid was covered; nothing saved")
+    cap.release()
+    cv2.destroyAllWindows()
+    return views, (WIDTH, HEIGHT)
+
+
+def run(camera, out=None):
+    """Guided calibration for a webcam -> its lens file."""
+    _, name = resolve_camera(camera)
+    board = make_board()
+    views, size = guided(camera, board, cv2.aruco.CharucoDetector(board), DATA / "calib_frames")
+    rms, K, dist, used = calibrate(board, views, size)
+    out = out or camera_file(name)
+    save(out, name, rms, K, dist, used, size)
+    return out
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--camera", default="0", help="name (substring is fine) or index")
     p.add_argument("--images", type=Path, help="calibrate from saved frames instead of the live camera")
-    p.add_argument("--out", type=Path, default=DATA / "intrinsics.json")
+    p.add_argument("--name", help="webcam name for the lens file, with --images")
+    p.add_argument("--out", type=Path, help="default data/cameras/<webcam>.json")
     args = p.parse_args()
 
+    if not args.images:
+        run(args.camera, args.out)
+        return
     board = make_board()
-    detector = cv2.aruco.CharucoDetector(board)
-    if args.images:
-        views, size = from_images(args.images, board, detector)
-    else:
-        views, size = from_camera(args.camera, board, detector, DATA / "calib_frames")
+    views, size = from_images(args.images, board, cv2.aruco.CharucoDetector(board))
     rms, K, dist, used = calibrate(board, views, size)
-    save(args.out, rms, K, dist, used, size)
+    name = args.name or resolve_camera(args.camera)[1]
+    save(args.out or camera_file(name), name, rms, K, dist, used, size)
 
 
 if __name__ == "__main__":

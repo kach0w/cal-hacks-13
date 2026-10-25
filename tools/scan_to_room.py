@@ -1,41 +1,40 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.10,<3.13"
-# dependencies = ["open3d==0.19.0", "trimesh", "scipy", "pillow", "opencv-python>=4.8", "pyobjc-framework-Cocoa; sys_platform == 'darwin'"]
+# dependencies = ["open3d==0.19.0", "trimesh", "pillow", "opencv-python>=4.8"]
 # ///
-"""Polycam raw-data export -> data/room/room.glb + markers.json (handoffAB.md deliverables 1-2).
+"""Polycam scan -> data/room/room.glb + markers.json + plan.png. Usually run by setup_room.py.
 
-    uv run tools/scan_to_room.py data/room/scan_raw --marker-size 0.179
+    uv run tools/scan_to_room.py                 # the export zip(s) dropped into data/room/
+    uv run tools/scan_to_room.py path/to/export  # an unzipped export, or a zip
 
-Scan in Polycam's LiDAR mode with Developer mode on, then Export -> Raw data. Pass the unzipped
-folder (or the .zip). --marker-size is the black square measured off the print, in metres.
+Scan in Polycam's LiDAR mode with Developer mode on; export Raw data (and glTF if the raw zip
+has no mesh in it). No clicks or measurements: everything comes from the scan.
 
   1. load the mesh and the keyframes (images, phone poses, LiDAR depth)
-  2. work out how Polycam's poses and mesh line up, by checking mesh depth against LiDAR depth
+  2. check Polycam's poses and mesh line up, by comparing mesh depth with LiDAR depth
   3. find the markers in the keyframes and cast their corners onto the mesh
-  4. set the world frame: click a room corner on the floor, then a point on each of its two walls.
-     The clicks only need to be close: they snap to the scan's walls and to where those walls meet
-  5. write room.glb (world frame, transforms baked, <= --max-tris), markers.json, and plan.png:
-     a top-down picture with the origin and axes, to tape-measure checks.json from
-
-If step 2 finds no convention that lines up, the export can't be trusted: fall back to clicking
-marker corners by hand (CAMERA.md E3), then to our own ARKit app.
+  4. world frame: floor at y = 0, X and Z along the walls, origin at the corner of the floor's
+     outline, so the room is at x, z >= 0
+  5. write room.glb (transforms baked, <= --max-tris), markers.json, plan.png, scan_report.json
 """
 
 import argparse
+import shutil
 import sys
 import zipfile
 from dataclasses import dataclass
+from datetime import datetime
 from itertools import product
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-from printed import TAG_DICT
+from printed import TAG_CM, TAG_DICT
 from roomlib import (
-    DATA, FLIP_YZ, Mesh, detect_markers, load_json, marker_detector, pick_points, pixel_rays,
-    plane_rms, save_json, transform, world_from_clicks,
+    DATA, FLIP_YZ, Mesh, detect_markers, load_json, marker_detector, pixel_rays, plane_rms, save_json,
+    transform,
 )
 
 DEPTH_OK_M = 0.02  # median mesh-vs-LiDAR depth error that counts as lined up
@@ -44,10 +43,7 @@ CHECK_FRAMES = 12
 MIN_MARKER_PX = 25  # smaller detections are too coarse to place a corner
 MIN_SIGHTINGS = 3
 SPREAD_WARN_M = 0.01
-SCALE_TOL = 0.02  # handoff: scale within 2%
-WALL_SNAP_MAX_DEG = 30  # a click further off every wall than this is used as clicked
-WALL_SEARCH_M = 0.75  # how far along the floor from a wall click to look for the wall's surface
-WALL_BAND_M = (1.3, 2.3)  # height band where walls are clear of furniture
+FLOOR_MARKER_M = 0.05  # a marker this close to y = 0 is on the floor
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 
 
@@ -213,30 +209,6 @@ def locate_markers(mesh, frames, convention):
     return found
 
 
-def fit_floor(mesh, corner, up=np.array([0.0, 1.0, 0.0])):
-    """Floor plane near the clicked corner -> (unit up normal, corner moved down onto the plane)."""
-    import open3d as o3d
-
-    v, n = mesh.vertices, mesh.vertex_normals()
-    rel = v - corner
-    near = np.linalg.norm(rel - np.outer(rel @ up, up), axis=1) < 2.0
-    upward = near & (n @ up > 0.9)
-    # The floor is the lowest broad flat surface near the corner; desks and seats are above it.
-    floor_h = np.percentile(v[upward] @ up, 5) if upward.any() else corner @ up
-    flat = upward & (np.abs(v @ up - floor_h) < 0.05)
-    if flat.sum() < 100:
-        print("  WARNING: little floor found near the corner click; using gravity as up")
-        return up, corner
-    pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(v[flat]))
-    (a, b, c, d), _ = pcd.segment_plane(distance_threshold=0.01, ransac_n=3, num_iterations=1000)
-    normal = np.array([a, b, c])
-    scale = np.linalg.norm(normal)
-    normal, d = normal / scale, d / scale
-    if normal @ up < 0:
-        normal, d = -normal, -d
-    return normal, corner - (normal @ corner + d) * normal
-
-
 def wall_angle(tm):
     """The room's wall direction in the floor plane (radians), from every vertical surface's normal,
     weighted by area. Walls meet at right angles, so this plus multiples of 90 degrees covers them all.
@@ -247,57 +219,42 @@ def wall_angle(tm):
     return 0.25 * np.arctan2((w[vertical] * np.sin(4 * theta)).sum(), (w[vertical] * np.cos(4 * theta)).sum())
 
 
-def snap(direction, base):
-    """The wall direction nearest a clicked one -> (unit vector, degrees it moved)."""
-    angle = np.arctan2(direction[2], direction[0])
-    snapped = base + np.round((angle - base) / (np.pi / 2)) * np.pi / 2
-    return np.array([np.cos(snapped), 0.0, np.sin(snapped)]), float(np.degrees(abs(angle - snapped)))
-
-
-def wall_offset(tm, inward, near, up, floor_h):
-    """d in inward . x = d for the wall through a click, `inward` pointing into the room: the area-weighted
-    median of surfaces facing into the room within WALL_SEARCH_M of the click (across the floor), using
-    the band WALL_BAND_M above the floor where walls are clear of furniture. Falls back to the click."""
-    centres, normals, areas = tm.triangles_center, tm.face_normals, tm.area_faces
-    rel = centres - near
-    across = np.linalg.norm(rel - np.outer(rel @ up, up), axis=1)
-    height = centres @ up - floor_h
-    sel = ((np.abs(normals @ up) < 0.2) & (normals @ inward > np.cos(np.radians(20))) & (across < WALL_SEARCH_M)
-           & (height > WALL_BAND_M[0]) & (height < WALL_BAND_M[1]))
-    if sel.sum() < 10:
-        return float(inward @ near), False
-    offsets, weights = centres[sel] @ inward, areas[sel]
-    order = np.argsort(offsets)
-    half = np.searchsorted(np.cumsum(weights[order]), weights.sum() / 2)
-    return float(offsets[order][half]), True
-
-
-def square_up(mesh, corner, along_a, along_b, up):
-    """Clicks -> the exact frame: wall directions snapped to the scan's walls, and the corner moved to
-    where the two walls and the floor meet. Returns (corner, a point along wall A, one along wall B)."""
+def world_frame(mesh):
+    """The world frame from the scan alone -> 4x4 transform. Floor at y = 0 (the lowest height holding a
+    good share of the upward-facing area: desks and seats are above it, stray bits below it are small),
+    X and Z along the walls, origin at the corner of the floor's outline so the room is at x, z >= 0."""
+    import open3d as o3d
     import trimesh
 
     tm = trimesh.Trimesh(mesh.vertices, mesh.faces, process=False)
-    base = wall_angle(tm)
-    (dir_a, moved_a), (dir_b, moved_b) = snap(along_a - corner, base), snap(along_b - corner, base)
-    if max(moved_a, moved_b) > WALL_SNAP_MAX_DEG or abs(dir_a @ dir_b) > 0.5:
-        print(f"  WARNING: clicks are {moved_a:.0f} and {moved_b:.0f} degrees from the scan's walls, or along the "
-              "same wall; using them as clicked")
-        return corner, along_a, along_b
-    # From the corner the room lies between the two walls, so each wall's inward direction is the other's.
-    floor_h = up @ corner
-    (d_a, found_a), (d_b, found_b) = (wall_offset(tm, dir_b, along_a, up, floor_h),
-                                      wall_offset(tm, dir_a, along_b, up, floor_h))
-    exact = np.linalg.solve(np.vstack([dir_b, dir_a, up]), [d_a, d_b, up @ corner])
-    print(f"  wall directions snapped by {moved_a:.1f} and {moved_b:.1f} degrees; corner moved "
-          f"{np.linalg.norm(exact - corner) * 100:.0f} cm to where the walls meet"
-          + ("" if found_a and found_b else " (a wall wasn't found near its click; used the click)"))
-    return exact, exact + dir_a, exact + dir_b
+    normals, centres, areas = tm.face_normals, tm.triangles_center, tm.area_faces
+    upward = normals[:, 1] > 0.9  # Polycam's frames are gravity-aligned, Y up
+    heights = centres[upward, 1]
+    bins = np.arange(heights.min(), heights.max() + 0.04, 0.02)
+    hist, _ = np.histogram(heights, bins, weights=areas[upward])
+    floor_h = bins[np.argmax(hist >= 0.25 * hist.max())] + 0.01
+    flat = upward & (np.abs(centres[:, 1] - floor_h) < 0.05)
+
+    pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(centres[flat]))
+    (a, b, c, _), _ = pcd.segment_plane(distance_threshold=0.01, ransac_n=3, num_iterations=1000)
+    y = np.array([a, b, c]) / np.linalg.norm([a, b, c])
+    y = y if y[1] > 0 else -y
+    theta = wall_angle(tm)
+    x = np.array([np.cos(theta), 0.0, np.sin(theta)])
+    x -= (x @ y) * y
+    x /= np.linalg.norm(x)
+    R = np.vstack([x, y, np.cross(x, y)])  # right-handed: X x Y = Z
+
+    floor = tm.vertices[np.unique(tm.faces[flat])] @ R.T
+    origin = [np.percentile(floor[:, 0], 0.5), np.median(floor[:, 1]), np.percentile(floor[:, 2], 0.5)]
+    T = np.eye(4)
+    T[:3, :3], T[:3, 3] = R, -np.array(origin)
+    return T
 
 
 def plan_png(path, glb, mesh, T, world_markers, ppm=100):
     """Top-down picture of the room in the world frame, with the origin, the X and Z axes and the
-    markers drawn on: what to tape-measure from."""
+    markers drawn on."""
     import trimesh
 
     V = transform(T, mesh.vertices)
@@ -338,25 +295,10 @@ def plan_png(path, glb, mesh, T, world_markers, ppm=100):
         label = px(tip * 0.5 + (np.array([0, 0, 0.25]) if axis == "X" else np.array([0.15, 0, 0])))
         cv2.putText(img, f"+{axis}", label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, colour, 2)
     cv2.circle(img, px((0, 0, 0)), 7, (0, 255, 255), -1)
-    for i, line in enumerate(("yellow: origin, the corner. Arrows are 1 m.",
-                              "tape x from the wall along blue (Z), z from the wall along red (X)")):
-        cv2.putText(img, line, (10, H - 30 + 18 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    cv2.putText(img, "yellow: origin (floor, y = 0). Arrows are 1 m. Magenta: markers.", (10, H - 14),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     cv2.imwrite(str(path), img)
     print(f"wrote {path}")
-
-
-def frame_picks(mesh, path, convention_key, repick):
-    """The corner and wall clicks, reused only for the same scan and convention."""
-    if path.exists() and not repick:
-        saved = load_json(path)
-        if saved.get("convention") == convention_key and saved.get("mesh_vertices") == len(mesh.vertices):
-            print(f"  reusing the corner and wall clicks in {path} (--repick to redo)")
-            return [np.array(saved[k]) for k in ("corner", "along_a", "along_b")]
-    pts = pick_points(mesh, 3, "Click 3 points: (1) a room corner, on the floor where two walls meet, "
-                               "(2) anywhere on one of those walls, (3) anywhere on the other wall")
-    save_json(path, {"convention": convention_key, "mesh_vertices": len(mesh.vertices), "corner": pts[0].tolist(),
-                     "along_a": pts[1].tolist(), "along_b": pts[2].tolist()})
-    return list(pts)
 
 
 def decimate(vertices, faces, max_tris):
@@ -370,84 +312,108 @@ def decimate(vertices, faces, max_tris):
     return np.asarray(m.vertices), np.asarray(m.triangles)
 
 
-def main():
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("scan", type=Path, help="unzipped Polycam raw-data export, or the .zip")
-    p.add_argument("--marker-size", type=float, required=True, help="black square measured off the print, metres")
-    p.add_argument("--out", type=Path, default=DATA)
-    p.add_argument("--max-tris", type=int, default=300_000)
-    p.add_argument("--repick", action="store_true", help="redo the corner and wall clicks")
-    args = p.parse_args()
+def prepare_scan(path):
+    """The unzipped export to use. Zips found in `path` (Polycam's raw-data zip, plus its glTF zip when
+    the raw one has no mesh) are a new scan: they're unpacked into scan_raw/, an older scan_raw/ is kept
+    under a timestamped name, and the zips move in with their scan so they're not unpacked twice."""
+    path = Path(path)
+    if path.is_dir() and (path / "keyframes").exists():
+        return path
+    zips = [path] if path.suffix == ".zip" else sorted(path.glob("*.zip"))
+    target = (path.parent if path.suffix == ".zip" else path) / "scan_raw"
+    if zips:
+        if target.exists():
+            target.rename(target.with_name(f"scan_raw_{datetime.now():%Y%m%d_%H%M%S}"))
+        target.mkdir(parents=True)
+        for z in zips:
+            zipfile.ZipFile(z).extractall(target)
+            shutil.move(str(z), target / z.name)
+        print(f"  unpacked {', '.join(z.name for z in zips)} into {target}")
+    roots = sorted(p.parent for p in target.rglob("keyframes")) if target.exists() else []
+    if not roots:
+        sys.exit(f"no scan in {path}: drop Polycam's Raw-data zip (and its glTF zip) there")
+    scan = roots[0]
+    if not any(p.suffix.lower() in {".glb", ".gltf"} for p in scan.iterdir()):
+        mesh = next(target.rglob("*.glb"), None) or next(target.rglob("*.gltf"), None)
+        if mesh is not None:
+            shutil.move(str(mesh), scan / mesh.name)
+    return scan
 
-    scan = args.scan
-    if scan.suffix == ".zip":
-        target = scan.with_suffix("")
-        if not target.exists():
-            zipfile.ZipFile(scan).extractall(target)
-        roots = [d.parent for d in target.rglob("mesh_info.json")] + [d.parent for d in target.rglob("keyframes")]
-        scan = roots[0] if roots else target
 
-    print("1. loading the export")
+def process_scan(scan, out=DATA, marker_size=None, max_tris=300_000):
+    """Steps 1-5 -> a summary dict for setup_room.py."""
+    import trimesh
+
+    print("1. loading the scan")
     vertices, faces, align, frames = load_polycam(scan)
     print(f"  {len(faces):,} triangles, {len(frames)} keyframes")
 
-    print("2. lining up poses and mesh")
-    mesh_name, convention, mesh, depth_err = choose_convention(vertices, faces, align, frames)
-    convention_key = f"{mesh_name}|{'c2w' if convention[0] else 'w2c'}|{'arkit' if convention[1] else 'opencv'}"
+    print("2. checking poses and mesh line up")
+    _, convention, mesh, depth_err = choose_convention(vertices, faces, align, frames)
 
     print("3. finding markers")
     found = locate_markers(mesh, frames, convention)
-    for marker_id, (corners, n, spread) in found.items():
-        edges = np.linalg.norm(corners - np.roll(corners, -1, axis=0), axis=1)
-        print(f"  marker {marker_id}: {n} sightings, corner spread {spread * 1000:.1f} mm, "
-              f"edges {edges.mean() * 100:.1f} cm (measured {args.marker_size * 100:.1f} cm)")
     markers = {i: v for i, v in found.items() if v[1] >= MIN_SIGHTINGS}
     if len(markers) < len(found):
-        print(f"  skipped markers seen fewer than {MIN_SIGHTINGS} times: {sorted(set(found) - set(markers))}")
+        print(f"  seen too few times to use: {sorted(set(found) - set(markers))}")
+    edges = [np.linalg.norm(c - np.roll(c, -1, axis=0), axis=1).mean() for c, _, _ in markers.values()]
+    measured = float(np.median(edges)) if edges else TAG_CM / 100
+    marker_size = marker_size or measured
+    for i, (c, n, spread) in markers.items():
+        print(f"  marker {i}: {n} sightings, corners agree to {spread * 1000:.0f} mm")
+    if edges and abs(measured / (TAG_CM / 100) - 1) > 0.03:
+        print(f"  markers measure {measured * 100:.1f} cm in the scan, printed at {TAG_CM:.0f} cm: the printer "
+              "scaled them. That's fine; the scan's size is what's used")
 
     print("4. world frame")
-    corner, along_a, along_b = frame_picks(mesh, args.out / "frame_picks.json", convention_key, args.repick)
-    up, corner = fit_floor(mesh, corner)
-    corner, along_a, along_b = square_up(mesh, corner, along_a, along_b, up)
-    T = world_from_clicks(corner, along_a, along_b, up)
+    T = world_frame(mesh)
+    world_markers = {i: transform(T, c) for i, (c, _, _) in markers.items()}
+    for i, c in world_markers.items():
+        height = c[:, 1].mean()
+        where = f"on the floor ({abs(height) * 100:.1f} cm from y = 0)" if abs(height) < FLOOR_MARKER_M \
+            else f"{height:.2f} m up"
+        print(f"  marker {i}: {where}")
 
     print("5. writing")
-    import trimesh
-
-    world_v, world_f = decimate(transform(T, mesh.vertices), mesh.faces, args.max_tris)
-    args.out.mkdir(parents=True, exist_ok=True)
-    trimesh.Trimesh(world_v, world_f, process=False).export(args.out / "room.glb")
-    print(f"wrote {args.out / 'room.glb'} ({len(world_f):,} triangles)")
-
-    world_markers = {i: transform(T, c) for i, (c, _, _) in markers.items()}
-    save_json(args.out / "markers.json", {
+    world_v, world_f = decimate(transform(T, mesh.vertices), mesh.faces, max_tris)
+    out.mkdir(parents=True, exist_ok=True)
+    trimesh.Trimesh(world_v, world_f, process=False).export(out / "room.glb")
+    print(f"wrote {out / 'room.glb'} ({len(world_f):,} triangles)")
+    save_json(out / "markers.json", {
         "dictionary": TAG_DICT,
-        "marker_size_m": args.marker_size,
+        "marker_size_m": round(marker_size, 4),
         "markers": {str(i): np.round(c, 4).tolist() for i, c in world_markers.items()},
     })
-    plan_png(args.out / "plan.png", find_mesh(scan), mesh, T, world_markers)
-    for i, c in world_markers.items():  # markers on the floor or the two origin walls should sit at 0
-        planes = {"the floor (y)": c[:, 1], "the Z wall (x)": c[:, 0], "the X wall (z)": c[:, 2]}
-        name, coord = min(planes.items(), key=lambda kv: np.abs(kv[1]).mean())
-        print(f"  marker {i}: {np.abs(coord).mean() * 100:.1f} cm off {name}")
+    plan_png(out / "plan.png", find_mesh(scan), mesh, T, world_markers)
 
     warnings = []
     if len(markers) < 3:
-        warnings.append(f"only {len(markers)} markers located; the handoff needs >= 3")
+        warnings.append(f"only {len(markers)} markers found in the scan; the camera needs at least 3")
     elif plane_rms(np.concatenate(list(world_markers.values()))) < 0.05:
-        warnings.append("every marker is on one plane; put at least one on a wall (or the floor)")
-    report = {"convention": convention_key, "depth_median_m": depth_err, "markers": {}}
-    for i, (c, n, spread) in markers.items():
-        ratio = float(np.linalg.norm(c - np.roll(c, -1, axis=0), axis=1).mean() / args.marker_size)
-        report["markers"][str(i)] = {"sightings": n, "spread_m": round(spread, 4), "edge_ratio": round(ratio, 4)}
-        if abs(ratio - 1) > SCALE_TOL:
-            warnings.append(f"marker {i} measures {ratio:.1%} of its printed size: scale or a bad sighting")
+        warnings.append("every marker is on one plane; put at least one on a wall and one on the floor")
+    for i, (_, _, spread) in markers.items():
         if spread > SPREAD_WARN_M:
-            warnings.append(f"marker {i} corners spread {spread * 1000:.0f} mm across sightings")
-    report["warnings"] = warnings
-    save_json(args.out / "scan_report.json", report)
+            warnings.append(f"marker {i}'s corners only agree to {spread * 1000:.0f} mm across the scan")
+    report = {
+        "depth_median_m": depth_err,
+        "marker_size_m": round(marker_size, 4),
+        "markers": {str(i): {"sightings": n, "spread_m": round(spread, 4)} for i, (_, n, spread) in markers.items()},
+        "warnings": warnings,
+    }
+    save_json(out / "scan_report.json", report)
+    return report
 
-    print("\n" + ("\n".join(f"WARNING: {w}" for w in warnings) if warnings else "all scan checks passed"))
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("scan", nargs="?", type=Path, default=DATA,
+                   help="folder with the export zip(s) (default data/room/), an unzipped export, or a zip")
+    p.add_argument("--marker-size", type=float, help="black square in metres; default: measured from the scan")
+    p.add_argument("--out", type=Path, default=DATA)
+    p.add_argument("--max-tris", type=int, default=300_000)
+    args = p.parse_args()
+    report = process_scan(prepare_scan(args.scan), args.out, args.marker_size, args.max_tris)
+    print("\n" + ("\n".join(f"WARNING: {w}" for w in report["warnings"]) or "all scan checks passed"))
 
 
 if __name__ == "__main__":
