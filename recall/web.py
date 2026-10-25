@@ -153,8 +153,8 @@ class Web:
         # Moss: when it (not the exact words) worked out the item, the page says how it understood
         if understood and (a.status != "info" or t.startswith("history")):
             r["understood"] = {**understood, "name": self.query.name(oid), "words": wording(text)}
-        if t.startswith("when ") and self.query.moss:  # and for "when did...", the moment in the history
-            r["events"] = self.moss_events(text)["matches"][:1]
+        if t.startswith("when ") and oid and self.query.moss:  # and for "when did...", that item's moment in the history
+            r["events"] = self.moss_events(text, about=oid)["matches"][:1]
         return r
 
     def moss_status(self) -> dict:
@@ -164,9 +164,10 @@ class Web:
             return {"on": False}
         return {"on": True, "ready": m.ready(0), "model": MOSS_MODEL, "min_score": m.min_score}
 
-    def moss_events(self, q: str) -> dict:
+    def moss_events(self, q: str, about=None) -> dict:
         """GET /moss/events?q=: the events in the memory's log that best match a question about
-        what happened ("when did the glasses go into the bag?"), found by Moss, best first."""
+        what happened ("when did the glasses go into the bag?"), found by Moss, best first.
+        about: only the events of that item, or of things going into it."""
         if self.query.moss is None:
             return {"on": False, "matches": []}
         places = self.query.places()
@@ -177,8 +178,9 @@ class Web:
                 text = text.split(" — inferred")[0].replace(" went into ", " probably went into ", 1)
             return text
         hits, ms = self.query.moss.search_events(q, self.memory.store.events(), told)
+        hits = [h for h in hits if about is None or about in (h[0].object, h[0].container)]
         return {"on": True, "ms": None if ms is None else round(ms, 1),
-                "matches": [{"t": e.ts, "time": clock(e.ts), "text": text, "score": round(score, 2)}
+                "matches": [{"t": e.ts, "time": clock(e.ts), "item": e.object, "text": text, "score": round(score, 2)}
                             for e, text, score in hits]}
 
     def listen(self) -> dict:

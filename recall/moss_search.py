@@ -99,8 +99,11 @@ class MossSearch:
         session = await client.session(INDEX, MODEL, auto_load_on_init=False)
         await session.add_docs([DocumentInfo(id=i, text=t) for i, t in documents(self.items)])
         log.info("moss: indexed %d item names", len(documents(self.items)))
-        self._events = await client.session(EVENTS_INDEX, MODEL, auto_load_on_init=False)
-        self._event_ids = set()  # what's in the events index; only touched on the Moss thread
+        self._events, self._event_ids = None, set()  # the ids: what's in the events index; only touched on the Moss thread
+        try:  # the history index is extra: without it, item matching still works
+            self._events = await client.session(EVENTS_INDEX, MODEL, auto_load_on_init=False)
+        except Exception:
+            log.warning("moss: no history index", exc_info=True)
         return session
 
     def ready(self, timeout=None) -> bool:
@@ -152,7 +155,7 @@ class MossSearch:
         """([(event, its words, score)] best first, query milliseconds) for a question about what
         happened. events is the memory's log (Store.events()); the ones not yet in the index are
         added first. ([], None) if Moss isn't ready, fails, or is still reading a long log."""
-        if not text.strip() or not self.ready(READY_WAIT_S):
+        if not text.strip() or not self.ready(READY_WAIT_S) or self._events is None:
             return [], None
         # The same event always gets the same id (db.py's unique key), so a re-read log adds
         # only what's new, and ids from a memory that was since started over are dropped.

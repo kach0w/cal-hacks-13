@@ -41,9 +41,12 @@ adds only what's new and events from a memory that was started over are ignored.
 
 - `GET /moss/events?q=when did the glasses go into the bag` returns the best matches with
   their times: `{"on": true, "ms": 2.1, "matches": [{"t": ..., "time": "5:01 AM",
-  "text": "glasses probably went into the blue bag", "score": 0.57}]}`
-- A question starting with "when" also gets the top match on the answer card:
+  "item": "glasses", "text": "glasses probably went into the blue bag", "score": 0.57}]}`
+- A question starting with "when" that is about an item (by exact words or by Moss) also gets
+  the top match about that item (or something going into it) on the answer card:
   *From the history: 5:01 AM, glasses probably went into the blue bag (Moss)*.
+  Matches about unrelated items are left off, so "when is my daughter coming?" never shows an
+  unrelated moment from the log.
 
 `GET /moss` says whether Moss is on: `{"on": true, "ready": true, "model": "moss-minilm",
 "min_score": 0.4}` or `{"on": false}`.

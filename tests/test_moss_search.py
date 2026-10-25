@@ -257,6 +257,11 @@ def test_moss_events_route_and_when_questions(tmp_path, monkeypatch):
     a = web.ask("When did the glasses go into the bag?")
     assert "blue bag" in a["answer"] and [(e["t"], e["text"]) for e in a["events"]] == [(top["t"], top["text"])]
     assert "events" not in web.ask("where are my glasses")
+    assert top["item"] == "glasses" and all(e["item"] == "glasses" for e in a["events"])
+    assert not web.ask("When is my daughter coming?").get("events")  # no item, no moment from the log
+    assert not web.ask("When were my keys probably put into the bag?").get("events")  # only the keys' own moments
+    a = web.ask("When did the glasses go into the blue bag?")  # names the bag: things going into it count
+    assert [e["text"] for e in a["events"]] == ["glasses probably went into the blue bag"]
     off = moss_web(tmp_path / "off", monkeypatch, moss=None)
     assert off.routes["/moss/events"]({"q": ["glasses"]}) == {"on": False, "matches": []}
     assert "events" not in off.ask("when did the glasses go into the bag")
@@ -277,3 +282,14 @@ def test_real_moss_understands_vague_wording():
     assert m.ready(60)
     oid, score, ms = m.match_info("where is the thing I open the front door with")
     assert oid == "keys" and score >= m.min_score and ms < moss_search.TIMEOUT_S * 1000
+
+
+def test_item_matching_works_without_the_history_index(tmp_path):
+    class NoHistory(FakeClient):
+        async def session(self, name, model=None, **kw):
+            if name == moss_search.EVENTS_INDEX:
+                raise RuntimeError("index limit reached")
+            return await super().session(name, model, **kw)
+    m = MossSearch(ABOUT, "pid", "key", client=NoHistory())
+    assert m.ready(5) and m.match("what you open the front door with") == "keys"
+    assert m.search_events("glasses", [], str) == ([], None)
