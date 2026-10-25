@@ -11,7 +11,8 @@ Runs inside live (it needs the newest frame and the memory), on its own threads:
 
 The 🎤 button asks out loud through the laptop's mic (recall/voice.py: Whisper on the laptop), so it
 works from any device on the wifi; press it again to stop listening sooner. The answer is spoken
-back by the page. With MOSS_PROJECT_ID/MOSS_PROJECT_KEY set, Moss resolves vague wording to an item
+back by the page. The band's button (over Bluetooth) is the same press, and the laptop speaks that
+answer itself. With MOSS_PROJECT_ID/MOSS_PROJECT_KEY set, Moss resolves vague wording to an item
 (moss_search.py).
 
 Routes: /  /state  /ask?q=  /listen  /listen?stop=1  /guide  /cam.jpg
@@ -39,7 +40,7 @@ from .moss_search import MossSearch
 from .guide import SHOULDER_M, Guide, words
 from .overlay import live_view
 from .query import Query, clock
-from .voice import Mic, Transcriber
+from .voice import Mic, Transcriber, speak
 
 log = logging.getLogger("recall")
 
@@ -80,6 +81,7 @@ class Web:
         self.band_side = 0  # band_dir's side, 0 before anything is sent
         self._waving = False  # which end of the wave the last packet past the servo's reach was
         self.mic, self.stt = Mic(), Transcriber(items)  # the 🎤 button's; warm_voice() readies them
+        self.speak = speak  # says the band button's answers on the laptop (macOS say)
         self._listening = threading.Lock()  # one question at a time from the page
         self._stop_listening = threading.Event()
 
@@ -157,6 +159,18 @@ class Web:
         log.info("voice: heard %r", heard)
         return {"heard": heard, **self.ask(heard)}
 
+    def band_pressed(self):
+        """The band's button: the 🎤 button's job, with the answer spoken on the laptop (nobody is
+        looking at a page). A press while a question is being heard ends it, as a second 🎤 press does."""
+        if self._listening.locked():
+            self.stop_listening()
+            return
+        r = self.listen()
+        if r.get("busy"):  # the page or the terminal started listening first
+            return
+        log.info("voice (band): heard %r -> %s", r.get("heard"), r["answer"])
+        self.speak(r["answer"])
+
     def stop_listening(self):
         self._stop_listening.set()
 
@@ -177,7 +191,8 @@ class Web:
         return {"item": name, "target": g["target"],
                 "dir": round(g["dir"]) if live else None,
                 "words": words(g["dir"], g["dist"]) if live else g["note"],
-                "metres": round(g["metres"], 1) if live and g["metres"] is not None else None}
+                "metres": round(g["metres"], 1) if live and g["metres"] is not None else None,
+                "listening": self._listening.locked()}  # the laptop mic is hearing a question, from any press
 
     # --- guidance thread -----------------------------------------------------------------
 
@@ -349,7 +364,7 @@ class Web:
         threading.Thread(target=server.serve_forever, name="web", daemon=True).start()
         threading.Thread(target=self._guide_loop, name="guidance", daemon=True).start()
         if self.band_host:
-            self.band = connect_band(self.band_host)
+            self.band = connect_band(self.band_host, on_press=self.band_pressed)
         url = f"http://{lan_ip()}:{server.server_address[1]}"  # port 0 = any free port (tests)
         log.info("web page: %s", url)
         return url
@@ -444,9 +459,10 @@ PAGE = """<!doctype html>
   // Ask out loud: the laptop's mic listens until you stop talking (Whisper on the laptop,
   // recall/voice.py), so this works from a phone too; press again to stop sooner. Moss on the
   // server works out which item vague wording means.
-  let listening = false;
+  let listening = false;        // this page's own question is being heard
+  let laptopListening = false;  // the laptop is hearing a question from anywhere (/guide)
   $("mic").onclick = async () => {
-    if (listening) return fetch("/listen?stop=1");
+    if (listening || laptopListening) return fetch("/listen?stop=1");
     listening = true;
     speechSynthesis.cancel();
     $("mic").classList.add("on"); $("q").value = ""; $("q").placeholder = "Listening… ask the laptop";
@@ -493,6 +509,12 @@ PAGE = """<!doctype html>
   async function guideTick() {
     try {
       const g = await (await fetch("/guide")).json();
+      // The band's button (or the terminal) can start the laptop listening too: show it on the 🎤.
+      laptopListening = g.listening;
+      if (!listening) {
+        $("mic").classList.toggle("on", g.listening);
+        $("q").placeholder = g.listening ? "Listening… ask the laptop" : "Where are my keys?";
+      }
       $("guide").hidden = !g.item;
       if (g.item) {
         const to = g.target && g.target !== g.item ? `the ${g.target} (your ${g.item} is in it)` : `your ${g.item}`;

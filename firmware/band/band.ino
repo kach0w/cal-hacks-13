@@ -6,7 +6,9 @@
 //   dist = 0..100, 0 = on top of the target
 //
 // The band advertises as "sixsevendemons" with the Nordic UART service; the laptop
-// (recall/band.py) writes each packet to its RX characteristic. Needs an ESP32 with
+// (recall/band.py) writes each packet to its RX characteristic. The button (GPIO 17 to
+// GND) sends "press" on the TX characteristic: the laptop listens for a question, like
+// the web page's mic button, and a press while it listens stops it. Needs an ESP32 with
 // Bluetooth (not the S2) and the ESP32Servo library; the BLE library comes with the
 // ESP32 board package. If Arduino says the sketch is too big: Tools -> Partition Scheme
 // -> Huge APP.
@@ -22,12 +24,18 @@
 
 #include <BLEDevice.h>
 #include <BLEServer.h>
+#if defined(CONFIG_BLUEDROID_ENABLED)
+#include <BLE2902.h>  // NimBLE (the S3's stack in board package 3.x) adds this descriptor itself
+#endif
 #include <ESP32Servo.h>
 
 const int SERVO_PIN = 13;
+const int BUTTON_PIN = 17;                 // to GND: pressed reads LOW (internal pull-up)
+const unsigned long DEBOUNCE_MS = 30;
 const char* BLE_NAME = "sixsevendemons";
 const char* UART_SERVICE = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E";  // Nordic UART service
 const char* UART_RX = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E";       // the laptop writes packets here
+const char* UART_TX = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E";       // the band tells it about presses here
 const bool SERVO_REVERSED = true;   // SG90 angle grows counterclockwise from above; dir is clockwise
 
 // FORWARD: servo angle where the arrow points straight out from the chest.
@@ -51,6 +59,10 @@ unsigned long lastPacketAt = 0;
 unsigned long closeSince = 0;
 bool foundDone = false;
 unsigned long lastTick = 0;
+BLECharacteristic* tx = nullptr;
+volatile bool laptopConnected = false;
+bool buttonDown = false;
+unsigned long buttonChangedAt = 0;
 
 // The newest packet, written by the Bluetooth task and read by loop(). Only the newest matters.
 portMUX_TYPE rxMux = portMUX_INITIALIZER_UNLOCKED;
@@ -92,10 +104,12 @@ class RxCallbacks : public BLECharacteristicCallbacks {
 
 class ServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer* server) override {
+    laptopConnected = true;
     Serial.println("ble: laptop connected");
   }
   void onDisconnect(BLEServer* server) override {
     // Packets stop, so the arrow goes to rest by itself; be findable again.
+    laptopConnected = false;
     Serial.println("ble: disconnected, advertising again");
     BLEDevice::startAdvertising();
   }
@@ -109,6 +123,10 @@ void startBluetooth() {
   BLECharacteristic* rx = service->createCharacteristic(
       UART_RX, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
   rx->setCallbacks(new RxCallbacks());
+  tx = service->createCharacteristic(UART_TX, BLECharacteristic::PROPERTY_NOTIFY);
+#if defined(CONFIG_BLUEDROID_ENABLED)
+  tx->addDescriptor(new BLE2902());  // lets the laptop subscribe to presses
+#endif
   service->start();
   BLEDevice::startAdvertising();  // the name only: the laptop finds the band by name
   Serial.printf("ble: advertising as %s\n", BLE_NAME);
@@ -146,6 +164,23 @@ void readPackets() {
   lastPacketAt = millis();
 }
 
+// A press (not the release) tells the laptop to listen for a question.
+void readButton() {
+  bool down = digitalRead(BUTTON_PIN) == LOW;
+  unsigned long now = millis();
+  if (down == buttonDown || now - buttonChangedAt < DEBOUNCE_MS) return;
+  buttonDown = down;
+  buttonChangedAt = now;
+  if (!down) return;
+  if (!laptopConnected) {
+    Serial.println("button: pressed, no laptop connected");
+    return;
+  }
+  tx->setValue((uint8_t*)"press", 5);
+  tx->notify();
+  Serial.println("button: pressed -> laptop");
+}
+
 void setup() {
   Serial.begin(115200);
   ESP32PWM::allocateTimer(0);
@@ -156,11 +191,13 @@ void setup() {
   servo.write(45); delay(400);
   servo.write(135); delay(400);
   servo.write(REST);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
   startBluetooth();
 }
 
 void loop() {
   readPackets();
+  readButton();
 
   unsigned long now = millis();
   if (now - lastTick < SERVO_TICK_MS) return;

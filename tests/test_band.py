@@ -67,3 +67,37 @@ def test_bluetooth_finds_connects_writes_and_reconnects():
     wait(lambda: FakeClient.sessions == 2 and link.connected)
     link.send(10, 20)
     wait(lambda: FakeClient.writes[-1][2] == b"10,20")
+
+
+class NotifyingClient:
+    """A band whose button can be pressed: start_notify keeps the handler."""
+    handlers = {}
+
+    def __init__(self, device):
+        self.is_connected = True
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        self.is_connected = False
+
+    async def start_notify(self, char, handler):
+        NotifyingClient.handlers[char] = handler
+
+    async def write_gatt_char(self, char, data, response):
+        pass
+
+
+class AlwaysThere:
+    @staticmethod
+    async def find_device_by_name(name, timeout):
+        return f"device:{name}"
+
+
+def test_the_band_button_calls_on_press():
+    pressed = []
+    link = band.Ble(band.NAME, on_press=lambda: pressed.append(1), scanner=AlwaysThere, client=NotifyingClient)
+    wait(lambda: link.connected)
+    NotifyingClient.handlers[band.UART_TX](None, bytearray(b"press"))
+    wait(lambda: pressed == [1])
