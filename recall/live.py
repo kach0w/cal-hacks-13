@@ -5,6 +5,7 @@
     python -m recall.live --web                 # + web page: board, ask box, guidance
     python -m recall.live --voice               # + ask out loud here (Enter); starts the web page too
     python -m recall.live --web --band          # + the band, over Bluetooth (recall/band.py)
+    DATABASE_URL=postgres://... python -m recall.live   # + a copy of the memory in the database (recall/db.py)
     python -m recall.live --src demo.mp4 --show # replay a recording into data/replay/
     python -m recall.live --src demo.mp4 --show --set REPLAY_SPEED=1    # watch it in real time
     python -m recall.live --src demo.mp4 --snapshots data/shots         # every pass as a jpg
@@ -24,6 +25,7 @@ from pathlib import Path
 from . import config
 from .band import NAME as BAND_NAME
 from .camera import open_source
+from .db import Database
 from .enroll import load_items
 from .memory import Memory
 from .models import clock_s
@@ -170,6 +172,8 @@ def run(cfg, items, places, source, detector, store, room=None, show=False, snap
             signal.signal(sig, signal.SIG_IGN)
         pipeline.stop()
         source.close()
+        if store.db:  # after the pipeline's last heartbeat: the database hears the camera stopped
+            store.db.close()
         if show:
             import cv2
             cv2.destroyAllWindows()
@@ -208,6 +212,8 @@ def main(argv=None):
     except KeyboardInterrupt:
         raise SystemExit("stopped")
     store = Store(cfg.data_dir if source.live else cfg.replay_dir)
+    if source.live:  # replays never reach the database
+        store.db = Database.from_env(cfg, store)
     if not source.live:
         store.clear()
         log.info("replaying %s into %s", cfg.src, store.root)

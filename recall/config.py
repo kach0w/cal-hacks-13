@@ -58,6 +58,9 @@ class Settings:
     reid_accept: float = 0.80          # cosine to the item's references: commit
     reid_hold: float = 0.60            # between hold and accept: commit nothing either way
 
+    # --- the database (recall/db.py; only with DATABASE_URL set) --------------
+    db_home: str = "home"              # this household's name there: one database, many rooms
+
     @property
     def zones_path(self) -> Path:
         return self.data_dir / "zones.json"

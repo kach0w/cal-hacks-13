@@ -10,6 +10,7 @@ moss                       # Moss semantic search: which item a vague question m
 sounddevice                # recall.voice: the laptop mic
 faster-whisper             # recall.voice: speech to text on the laptop (Whisper, plus the Silero VAD it ships)
 bleak                      # Bluetooth LE to the band (recall/band.py)
+psycopg[binary]>=3.2       # recall/db.py: the database (optional at runtime: only with DATABASE_URL)
 # Task 4 (HTTP):
 fastapi
 uvicorn
