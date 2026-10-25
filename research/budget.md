@@ -6,7 +6,7 @@
 
 Scope: this ledger covers paid third-party APIs and services for Recall. **The agents' own model usage (Claude Code sessions doing the research and builds) is not metered in this ledger.**
 
-## Actuals (as of 5:50 AM PDT, Oct 25)
+## Actuals (as of 5:45 AM PDT, Oct 25)
 
 | Item | Spent | Notes |
 |---|---|---|

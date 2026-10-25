@@ -1,6 +1,6 @@
 # Final report: Cal Hacks 13.0 sponsor tracks for Recall
 
-Written 5:50 AM PDT, Oct 25 2026. Submission deadline: **9:00 AM PDT today**.
+Written 5:45 AM PDT, Oct 25 2026. Submission deadline: **9:00 AM PDT today**.
 Everything below is on the local branch `sponsor/integration` (head `76f2f18`). **Nothing has been pushed.**
 
 ## Executive summary
