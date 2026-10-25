@@ -74,7 +74,8 @@ All files go in **`data/room/`**.
 }
 ```
 
-- `K`, `dist`: checkerboard calibration (`cv2.calibrateCamera`) at **1280×720**, autofocus off.
+- `K`, `dist`: ChArUco board calibration (`tools/calibrate_intrinsics.py` → `intrinsics.json`) at
+  **1280×720**, autofocus off.
 - `R`, `t`: **OpenCV world→camera convention**, `X_cam = R · X_world + t`; camera axes
   x right, y down, z forward. This is `cv2.solvePnP` output after `cv2.Rodrigues`.
 - `camera_center` = `−Rᵀ t`, the lens position in the room.
@@ -101,15 +102,18 @@ visible. Used to check the overlay and to detect a bumped camera.
 Tape-measured from the origin corner. Place a small object at each test point when
 `camera_ref.jpg` is taken (or take a second frame with them).
 
-### 6. `zones3d.json` — optional
+### 6. `surfaces.json` — the named surfaces (DESIGN §6.1)
 
 ```json
 [
-  {"name": "kitchen counter", "min": [x, y, z], "max": [x, y, z], "prep": "on"}
+  {"name": "kitchen counter", "box_min": [x, y, z], "box_max": [x, y, z], "prep": "on", "top": y}
 ]
 ```
 
-Axis-aligned boxes in the world frame. Replace the image-space zones once positions are 3D.
+Axis-aligned boxes in the world frame. They replace the image-space zones once positions are 3D.
+Written by `python -m recall.surfaces name` (drag boxes on `plan.png`; heights come from the scan).
+`top` is the surface's height; without it, `box_min`'s y. A hand-made `zones3d.json` with `min` /
+`max` instead of `box_min` / `box_max` is read too.
 
 ---
 
@@ -118,7 +122,8 @@ Axis-aligned boxes in the world frame. Replace the image-space zones once positi
 - Builds `data/room/xyz_map.npy` by ray-casting every camera pixel into `room.glb`
   (Open3D `RaycastingScene`), after undistorting with `K` + `dist`.
 - `pixel_to_world(u, v)` → lookup in `xyz_map`; `floor_hit(u, v)` → ray ∩ plane y = 0.
-- Plugs it in: `Memory(..., pixel_to_world=room.pixel_to_world)` fills `xyz` in the state.
+- Plugs it in: `Memory(..., pixel_to_world=room.pixel_to_world)` fills `xyz` in the state, and
+  each object's surface is the `surfaces.json` box its `xyz` falls in.
 - Re-registers after a bump from `markers.json` + a fresh frame.
 
 ## Acceptance (run together)
