@@ -770,7 +770,7 @@ PAGE = """<!doctype html>
       <div class="card care">
         <form id="careForm">
           <label for="careQ" class="vh">Ask Claude about the day</label>
-          <input id="careQ" placeholder="Did the glasses go missing today?" autocomplete="off" enterkeyhint="go">
+          <input id="careQ" placeholder="Lost anything today?" autocomplete="off" enterkeyhint="go">
           <button type="submit" class="primary" id="careAsk">Ask</button>
           <button type="button" class="secondary" id="careNote">Today's note</button>
         </form>
