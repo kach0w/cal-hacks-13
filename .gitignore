@@ -1,22 +1,16 @@
-# local data; data/reference/, the lens files in data/cameras/ and Person A's data/room/ deliverables are committed
+# Everything under data/ is local to one setup, so a fresh clone starts blank: the room scan and
+# camera registration (data/room/, from tools/setup_room.py), the lens files (data/cameras/), the
+# memory and its photos. Only the item photos (data/reference/) and data/room/README.md are committed.
 data/*
 !data/reference/
-!data/cameras/
 !data/room/
-# the scan export (it holds the home's GPS position), calibration photos and derived caches
-data/room/scan_raw*/
-data/room/calib_frames*/
-data/room/*_session1*
-data/room/*.tmp
-data/room/xyz_map.npy
-data/room/xyz_map.sha1
-data/room/surfaces_drawn.jpg
-data/room/surfaces.png
-data/room/surfaces_camera.jpg
+data/room/*
+!data/room/README.md
 *.zip
 # environment and model weights
 .venv/
 __pycache__/
+.pytest_cache/
 *.pt
 mobileclip*.ts
 .DS_Store

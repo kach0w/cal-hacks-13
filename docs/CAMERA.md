@@ -22,7 +22,7 @@ DESIGN §8 sketches more loosely.
 | B | Places — surfaces of the scan (`recall/surfaces.py`, named on its plan) once the room is registered; image zones (`recall/zones.py`) before that | **Built** (`recall/places.py`) |
 | C | Live loop — capture thread, detection thread (gate → detect → memory), frozen-camera guard | **Built** (`recall/live.py`, `pipeline.py`, `camera.py`, `gate.py`, `perception.py`) |
 | D | Memory + queries — state, append-only log, photos, where/changes/diff, "as of" stamping | **Built** (`recall/memory.py`, `store.py`, `query.py`, `ask.py`) |
-| E | Scan → map + markers, lens, registration (Person A's `tools/setup_room.py`); the runtime bridge `pixel_to_world` (`recall/room.py`) | **Delivered** (`data/room/`: room.glb, markers.json, plan.png, camera.json; lens in `data/cameras/`) |
+| E | Scan → map + markers, lens, registration (Person A's `tools/setup_room.py`); the runtime bridge `pixel_to_world` (`recall/room.py`) | **Delivered** (`setup_room.py` writes `data/room/`: room.glb, markers.json, plan.png, camera.json; lens in `data/cameras/`; both local, never committed) |
 | F | HTTP surface (DESIGN §7) | **To build** (task 4) |
 
 Tests (fake sightings, fake detector, the real scan with a known pose — no camera):
@@ -81,8 +81,9 @@ data/replay/          state/events/photos of the last --src video replay (wiped 
 data/range_test/      task 0 bursts per station + report/ sheets
 data/enroll/<id>/     crops from calibration (from the corner camera)
 data/reference/<id>.png  background-removed photos of each prop (committed) — re-id references
-data/cameras/         (E) one lens file per webcam (calibrate_intrinsics), reused in every room
-data/room/            (E) committed; formats in handoffAB.md. From Person A's setup_room.py:
+data/cameras/         (E) one lens file per webcam (calibrate_intrinsics), reused in every room. Local
+data/room/            (E) local: only its README.md is committed, so a fresh clone starts blank.
+                      Formats in handoffAB.md. From Person A's setup_room.py:
                       room.glb, markers.json, plan.png, scan_report.json (scan_to_room),
                       camera.json + camera_ref.jpg + camera_overlay.jpg (register_camera).
                       From recall: surfaces.json. Git-ignored: scan_raw*/ (the export, with the
@@ -345,18 +346,12 @@ the shared geometry and conventions live in `tools/roomlib.py`, and what's print
 `uv run tools/setup_room.py --camera <name>`. It runs E1–E3 below and prints its checks (E4). The
 three tools still run on their own: re-run `register_camera.py` alone after the camera is bumped.
 
-**State of `data/room/` (3ddesign):**
-- `room.glb` (56k triangles), `markers.json` (markers 0, 3, 4, 5 on the floor and two walls,
-  16.8 cm read from the scan), `plan.png`, `scan_report.json`. World frame found from the scan
-  (no clicks): floor at y = 0 (floor markers 3 and 4 sit within 1.3 cm of it), X and Z along the
-  walls, origin at the corner of the floor's outline. `scan_report.json` still notes that markers
-  0, 3 and 4's corners spread 20, 24 and 36 mm across sightings (Polycam's drift between passes).
-- Lens: `data/cameras/brio-101.json` — fx 1348, fy 1354, centre (619, 311), 0.85 px over 49
-  views (the first calibration's `cy = −249` is gone). Reused in every room.
-- `camera.json` + `camera_ref.jpg` + `camera_overlay.jpg`: registered from markers 0, 4, 5
-  (marker 3 is under the glass table) at 1.26 px; the webcam is at (−2.52, 2.58, 4.44), past the
-  scanned floor. With 3 markers in view, floor positions are good to roughly 5–8 cm; another
-  marker or two in its view (then a rescan) tightens it.
+**Nothing is committed:** `data/room/` and `data/cameras/` stay on the machine that set them up, so
+every clone runs the one command for its own room (and calibrates its webcam's lens the first
+time). The tests use a frozen copy of the first real scan in `tests/fixtures/room/` (camera at
+(−2.52, 2.58, 4.44), registered from 3 markers at 1.26 px). With 3 markers in view, floor
+positions are good to roughly 5–8 cm; a marker the scan never photographs closely enough isn't
+found and can't be used.
 
 ### E1. Scan → map + markers (`tools/scan_to_room.py`)
 The export zip(s) in `data/room/` are unpacked into `scan_raw/` (git-ignored: it holds the home's
