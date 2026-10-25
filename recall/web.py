@@ -9,6 +9,10 @@ Runs inside live (it needs the newest frame and the memory), on its own threads:
     them at the item, or at its container when the memory says it went into one.
 
 Routes: /  /state  /ask?q=  /guide  /cam.jpg  /photo/<path>
+
+With --band, every guidance update also goes to the necklace (firmware/band) as a UDP
+packet "dir,dist": dir in degrees, + = to the person's right; dist 0..100. When guidance
+stops, nothing is sent and the band parks its arrow by itself after a second.
 """
 import json
 import logging
@@ -31,11 +35,12 @@ log = logging.getLogger("recall")
 PORT = 8000
 GUIDE_FOR_S = 60       # stop guiding this long after a question
 GUIDE_EVERY_S = 0.15   # how often the guidance thread looks
+BAND_PORT = 4210       # firmware/band/band.ino listens here
 CAM_WIDTH = 960        # the page's camera picture
 
 
 class Web:
-    def __init__(self, cfg, items, memory, pipeline, places, room=None):
+    def __init__(self, cfg, items, memory, pipeline, places, room=None, band=None):
         self.cfg, self.items, self.memory, self.pipeline = cfg, items, memory, pipeline
         self.places, self.room = places, room
         self.query = Query(cfg, items, memory.store)
@@ -44,6 +49,14 @@ class Web:
         self.guiding = {"item": None, "since": 0.0, "dir": None, "dist": 100, "metres": None,
                         "target": None, "t": 0.0}
         self.cam_jpg = None
+        self.band = None  # (ip, port) of the necklace, if --band was given
+        if band:
+            try:
+                self.band = (socket.gethostbyname(band), BAND_PORT)
+                log.info("band: sending guidance to %s:%d", *self.band)
+            except OSError:
+                log.warning("band: can't find %s; guidance stays on the page only", band)
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     # --- what the page reads -------------------------------------------------------------
 
@@ -146,6 +159,11 @@ class Web:
         metres = self.guide.metres(target)
         with self._lock:
             self.guiding.update(dir=deg, dist=dist, metres=metres, target=target_name, t=time.time())
+        if self.band:
+            try:
+                self._sock.sendto(f"{int(round(deg))},{int(dist)}".encode(), self.band)
+            except OSError:  # band off or out of range: the page keeps guiding
+                pass
 
         body = tuple(int(v) for v in self.guide.body)
         tip = tuple(int(v) for v in self.guide.body + self.guide.facing * 100)

@@ -74,3 +74,29 @@ def test_http_routes(tmp_path):
     assert json.loads(get("/state"))["places"] == ["kitchen counter", "table"]
     assert "table" in json.loads(get("/ask?q=where%20are%20my%20keys"))["answer"]
     assert json.loads(get("/guide"))["item"] == "keys"
+
+
+def test_guidance_goes_to_the_band(tmp_path):
+    import socket
+    rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    rx.bind(("127.0.0.1", 0))
+    rx.settimeout(2)
+    cfg, store, memory, query = world(tmp_path)
+    web = Web(cfg, memory.items, memory, StubPipeline(), memory.places, band="127.0.0.1")
+    web.band = ("127.0.0.1", rx.getsockname()[1])
+    for t in (1, 2, 3):
+        memory.update([S("keys", KEYS_TABLE)], FRAME, t)
+    web.ask("where are my keys")
+
+    class FakeGuide:  # a person facing the camera, standing left of the keys
+        body, full_px = __import__("numpy").array([400.0, 300.0]), 120.0
+        facing = __import__("numpy").array([0.0, 1.0])
+        def update(self, image): return True
+        def toward(self, target, diag): return -90.0, 40
+        def metres(self, target): return 1.5
+        def facing_degrees(self): return 0.0
+
+    web.guide = FakeGuide()
+    web._guide_once()
+    assert rx.recv(64) == b"-90,40"
+    assert web.guidance()["words"] == "To your left"

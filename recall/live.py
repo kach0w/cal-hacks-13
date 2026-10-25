@@ -116,7 +116,7 @@ def show_window(pipeline, source, memory, room=None):
 
 
 def run(cfg, items, places, source, detector, store, room=None, show=False, snapshots=None,
-        web=False) -> Pipeline:
+        web=False, band=None) -> Pipeline:
     """Memory + the detection thread on `source`; blocks until the video ends, q, or Ctrl-C.
     room: the registered room (xyz + surfaces), or None. snapshots: a folder that gets the
     overlay of every detection pass (no window needed)."""
@@ -145,7 +145,7 @@ def run(cfg, items, places, source, detector, store, room=None, show=False, snap
         pipeline.start()
         if web:
             from .web import Web
-            print(f"Recall web page: {Web(cfg, items, memory, pipeline, places, room).start()}")
+            print(f"Recall web page: {Web(cfg, items, memory, pipeline, places, room, band).start()}")
         if show:
             show_window(pipeline, source, memory, room)
         else:
@@ -172,6 +172,7 @@ def main(argv=None):
     ap.add_argument("--src", help="camera index or a video file to replay (default: SRC setting)")
     ap.add_argument("--show", action="store_true", help="overlay window (q quits)")
     ap.add_argument("--web", action="store_true", help="web page: board, ask box, left/right guidance")
+    ap.add_argument("--band", metavar="HOST", help="with --web: also point the necklace, e.g. recall-band.local")
     ap.add_argument("--snapshots", type=Path, metavar="DIR", help="save the overlay of every detection pass")
     config.add_args(ap)
     a = ap.parse_args(argv)
@@ -195,7 +196,7 @@ def main(argv=None):
     if not source.live:
         store.clear()
         log.info("replaying %s into %s", cfg.src, store.root)
-    if run(cfg, items, places, source, detector, store, room, a.show, a.snapshots, a.web).crashed:
+    if run(cfg, items, places, source, detector, store, room, a.show, a.snapshots, a.web, a.band).crashed:
         raise SystemExit(1)
 
 
