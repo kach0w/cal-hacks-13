@@ -87,7 +87,11 @@ class Web:
         # More GET routes: path -> fn(query params, as parse_qs gives them) -> a dict (sent as JSON)
         # or (body bytes, content type). Each integration registers its own below.
         self.routes = {}
-        # [care] routes
+        # [care] Ask about the day: Claude answers the care partner from the memory (recall/care.py)
+        from .care import Care
+        self.care = Care(self.query, memory.store)
+        self.routes["/care"] = lambda p: self.care.ask(p.get("q", [""])[0])
+        self.routes["/care/summary"] = lambda p: self.care.summary()
 
         # [week] routes
 
@@ -587,7 +591,19 @@ PAGE = """<!doctype html>
     .log li { grid-template-columns: 4.75rem minmax(0, 1fr); gap: 12px; padding: 9px 18px 9px 12px; }
     .notice { padding: 14px 16px; gap: 14px; }
   }
-  /* [care] styles */
+  /* [care] Ask about the day (Claude, for family) */
+  .care { padding: 18px 20px 20px; }
+  .care form input { height: 48px; font-size: 1rem; }
+  .care form button { min-height: 48px; }
+  .care button:disabled { opacity: .6; cursor: default; }
+  .care-out { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .care-text { white-space: pre-line; overflow-wrap: anywhere; font-size: 1.0625rem; line-height: 1.55; }
+  .care-out[data-state="busy"] .care-text { color: var(--muted); font-weight: 600; }
+  .care-out[data-state="off"] .care-text { color: var(--muted); }
+  .care-out[data-state="error"] .care-text { font-weight: 600; }
+  .care-looked { color: var(--muted); font-size: .875rem; margin-top: 10px; overflow-wrap: anywhere; }
+  @media (max-width: 900px) { #careBox { order: 2; } }
+  @media (max-width: 640px) { .care { padding: 16px; } }
 
   /* [week] styles */
 
@@ -624,7 +640,22 @@ PAGE = """<!doctype html>
       </div>
     </section>
 
-    <!-- [care] panel -->
+    <!-- [care] Ask about the day: Claude, for family -->
+    <section id="careBox" aria-labelledby="careH">
+      <div class="sec-head"><h2 id="careH">Ask about the day</h2><p class="muted">For family. Claude reads the memory and answers. Not spoken aloud.</p></div>
+      <div class="card care">
+        <form id="careForm">
+          <label for="careQ" class="vh">Ask Claude about the day</label>
+          <input id="careQ" placeholder="Did the glasses go missing today?" autocomplete="off" enterkeyhint="go">
+          <button type="submit" class="primary" id="careAsk">Ask</button>
+          <button type="button" class="secondary" id="careNote">Today's note</button>
+        </form>
+        <div class="care-out" id="careOut" data-state="empty" aria-live="polite" hidden>
+          <p class="care-text" id="careText"></p>
+          <p class="care-looked" id="careLooked" hidden></p>
+        </div>
+      </div>
+    </section>
 
     <section class="card guide" id="guide" hidden aria-label="Directions">
       <div class="dial">
@@ -883,7 +914,34 @@ PAGE = """<!doctype html>
       : camSeen ? "Trying again every second." : "The picture appears here once the laptop's camera sends its first frame.";
     setTimeout(camTick, 1000);
   };
-  // [care] script
+  // [care] Ask about the day: Claude answers the family from the memory (/care, /care/summary).
+  // The server gives up after 25 s; the page stops waiting at 35 s either way.
+  async function careAsk(path) {
+    const out = $("careOut"), btns = [$("careAsk"), $("careNote")];
+    out.hidden = false; out.dataset.state = "busy"; out.setAttribute("aria-busy", "true");
+    $("careText").textContent = "Reading today's memory"; $("careLooked").hidden = true;
+    btns.forEach(b => b.disabled = true);
+    const stop = new AbortController(), timer = setTimeout(() => stop.abort(), 35000);
+    try {
+      const r = await (await fetch(path, { signal: stop.signal })).json();
+      out.dataset.state = r.status || "error";
+      $("careText").textContent = r.answer || "No answer came back. Try again.";
+      $("careLooked").hidden = !(r.looked_at && r.looked_at.length);
+      $("careLooked").textContent = "Looked at: " + (r.looked_at || []).join("; ") + ".";
+    } catch (e) {
+      out.dataset.state = "error";
+      $("careText").textContent = e.name === "AbortError" ? "That took too long. Try again in a moment." : "Couldn't reach the laptop. Try again in a moment.";
+    } finally {
+      clearTimeout(timer); out.setAttribute("aria-busy", "false");
+      btns.forEach(b => b.disabled = false);
+    }
+  }
+  $("careForm").onsubmit = e => {
+    e.preventDefault();
+    const q = $("careQ").value.trim();
+    q ? careAsk("/care?q=" + encodeURIComponent(q)) : $("careQ").focus();
+  };
+  $("careNote").onclick = () => careAsk("/care/summary");
 
   // [week] script
 
