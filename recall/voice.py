@@ -34,6 +34,8 @@ from collections import deque
 
 import numpy as np
 
+from . import tts
+
 log = logging.getLogger("recall")
 
 RATE = 16000           # what Whisper and the VAD both want
@@ -221,8 +223,13 @@ def legible(seg) -> bool:
 
 
 def speak(text):
-    """Say it out loud (macOS `say`); elsewhere the printed answer has to do."""
-    if text and shutil.which("say"):
+    """Say it out loud: Cartesia's voice when CARTESIA_API_KEY is set (recall/tts.py), else macOS
+    `say`; elsewhere the printed answer has to do."""
+    if not text:
+        return
+    if tts.play(tts.default().synthesize(text)):
+        return
+    if shutil.which("say"):
         subprocess.run(["say", text], check=False)
 
 

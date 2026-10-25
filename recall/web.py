@@ -98,7 +98,9 @@ class Web:
         self.routes["/week"] = lambda params: week(
             self.memory.store, {oid: it.name for oid, it in self.items.items()})
 
-        # [tts] routes
+        # Cartesia: the page's spoken words in the same calm voice as the laptop's (recall/tts.py)
+        from . import tts
+        self.routes["/tts"] = tts.route(tts.default())
 
         # Moss semantic search: whether it's on, and what in the history matches a question
         self.routes["/moss"] = lambda params: self.moss_status()
@@ -788,16 +790,49 @@ PAGE = """<!doctype html>
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const cap = s => s ? s[0].toUpperCase() + s.slice(1) : "";
   // An answer is spoken whole: directions that start meanwhile wait for it (they used to cut it off).
+  // Cartesia: words are spoken in the laptop's Cartesia voice (/tts, recall/tts.py) when it has one,
+  // else, or when the audio isn't ready within 1.5 s, in the browser's own voice.
   let answering = 0;
+  let voiceOff = false;  // the laptop has no Cartesia voice: stop asking
+  let playing = null, turn = 0;
+  const synth = window.speechSynthesis;  // missing in some in-app browsers: the page must still load
+  const browserCancel = synth ? synth.cancel.bind(synth) : () => {};
+  const hush = () => {
+    turn++; answering = 0;
+    if (playing) { playing.pause(); playing = null; }
+    browserCancel();
+  };
+  if (synth) synth.cancel = hush;  // so the mic button's cancel silences this voice too
   const say = (text, isAnswer) => {
-    speechSynthesis.cancel();
+    hush();
     if (!text) return;
-    const u = new SpeechSynthesisUtterance(text);
+    const mine = ++turn;
+    let done = () => {};
     if (isAnswer) {
-      const mine = answering = Date.now() + 1500 + 90 * text.length;  // in case onend never comes
-      u.onend = u.onerror = () => { if (answering === mine) answering = 0; };
+      const until = answering = Date.now() + 1500 + 90 * text.length;  // in case onend never comes
+      done = () => { if (answering === until) answering = 0; };
     }
-    speechSynthesis.speak(u);
+    const browser = () => {
+      if (mine !== turn) return;
+      if (!synth) return done();
+      const u = new SpeechSynthesisUtterance(text);
+      u.onend = u.onerror = done;
+      speechSynthesis.speak(u);
+    };
+    if (voiceOff || text.length > 400) return browser();  // 400: tts.MAX_CHARS
+    const ctl = new AbortController(), late = setTimeout(() => ctl.abort(), 1500);
+    fetch("/tts?text=" + encodeURIComponent(text), { signal: ctl.signal }).then(async r => {
+      if (!(r.headers.get("Content-Type") || "").startsWith("audio/")) {
+        if ((await r.json()).off) voiceOff = true;
+        throw new Error("no voice");
+      }
+      const src = URL.createObjectURL(await r.blob());
+      clearTimeout(late);
+      if (mine !== turn) return URL.revokeObjectURL(src);
+      const a = playing = new Audio(src);
+      a.onended = () => { URL.revokeObjectURL(src); if (playing === a) playing = null; done(); };
+      try { await a.play(); } catch (e) { if (playing === a) playing = null; URL.revokeObjectURL(src); throw e; }
+    }).catch(browser).finally(() => clearTimeout(late));
   };
 
   // The answer card: empty, busy, listening, or an answer with how sure it is.
