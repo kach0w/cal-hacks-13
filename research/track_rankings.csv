@@ -1,0 +1,48 @@
+rank,track,weighted_score,product_fit,judging_advantage,differentiation,feasibility,multi_track,cost_efficiency,p_finish_on_time,p_meets_requirements,needs_pivot,decision
+1,Cal Hacks Best People-First Social Impact Hack,88.2,10.0,7.7,7.0,9.7,9.0,10.0,0.99,0.98,no,SECONDARY (no-build Cal Hacks category)
+2,Cal Hacks Most Technically Complex Hack,85.2,9.0,7.7,7.7,9.0,9.0,10.0,0.95,0.98,no,SECONDARY (no-build Cal Hacks category)
+3,[MLH] Best Use of Tiger Data,82.2,9.0,7.3,7.3,9.0,7.3,10.0,0.90,0.92,no,SECONDARY (build)
+4,Cal Hacks First Overall,81.8,8.7,6.7,7.7,8.7,9.7,10.0,0.97,0.98,no,SECONDARY (no-build Cal Hacks category)
+4,Cal Hacks Second Overall,81.8,8.7,6.7,7.7,8.7,9.7,10.0,0.97,0.98,no,SECONDARY (no-build Cal Hacks category)
+4,Cal Hacks Third Overall,81.8,8.7,6.7,7.7,8.7,9.7,10.0,0.97,0.98,no,SECONDARY (no-build Cal Hacks category)
+7,Cal Hacks Most Creative Hack,80.8,8.0,6.7,8.0,9.7,8.7,10.0,0.99,0.98,no,SECONDARY (no-build Cal Hacks category)
+8,Cal Hacks Best Hardware Hack,80.5,8.7,7.3,7.0,8.0,8.7,10.0,0.92,0.97,no,SECONDARY (no-build Cal Hacks category)
+9,[Anthropic] Claude for Public Benefit,76.8,8.7,7.7,7.0,6.3,8.0,7.3,0.70,0.72,no,PRIMARY (build)
+10,[Moss] Best Use of Moss,73.5,8.0,6.7,6.3,9.0,5.3,9.0,0.90,0.87,no,SECONDARY (build)
+11,[Cartesia] Best Use of Cartesia,73.2,8.0,6.7,6.7,8.0,6.0,9.0,0.85,0.87,no,SECONDARY (build)
+12,"[Microsoft] Built for the Real World (1st), Customer Impact Award (2nd)",72.8,7.3,5.7,6.0,10.0,7.7,10.0,0.98,0.80,no,SECONDARY (framing-only opt-in)
+13,Cal Hacks Hacker's Choice,68.0,6.7,5.0,6.7,9.0,7.0,10.0,0.99,0.95,no,SECONDARY (no-build Cal Hacks category)
+14,[MLH] Commit Fellowship Prize Category,66.2,6.7,5.7,5.7,9.0,5.0,10.0,0.88,0.78,no,SECONDARY (framing-only opt-in; only if the team wants the Nov 2-20 sprint)
+15,[Meta] Meta/Facebook: Bringing People Closer Together with AI,64.2,6.7,4.7,5.7,8.7,6.0,10.0,0.95,0.60,no,SECONDARY (framing-only opt-in)
+16,[MLH] Best Use of Gen AI (Hive only; unverified on Devpost),57.5,6.0,4.3,4.3,7.3,6.3,9.7,0.72,0.63,no,STRETCH (tick only if selectable on Devpost and Claude ships)
+17,[Fetch.ai] Best Use of Fetch.ai,53.5,6.0,5.3,5.7,3.0,4.7,9.0,0.35,0.37,no,REJECT
+18,[MLH] Best Use of Gemini API,51.3,5.0,4.3,3.0,8.0,4.3,9.3,0.82,0.85,no,STRETCH (only as Claude fallback; never both)
+19,[Bitdeer AI] Best Use of Bitdeer AI Model Studio,51.2,5.3,5.3,4.0,6.0,4.0,5.7,0.68,0.70,no,REJECT
+20,[Spacetime] Best Use of Spacetime,43.3,4.7,4.3,5.3,2.0,3.0,9.0,0.22,0.28,no,REJECT
+21,[MLH] Best Domain Name from GoDaddy Registry,41.8,3.0,3.3,2.3,9.3,2.0,10.0,0.93,0.85,no,STRETCH
+22,[Elastic] Best use of the Elastic Agent Builder on a Serverless Instance,40.5,4.0,4.0,3.7,4.0,3.0,8.0,0.48,0.48,no,REJECT
+23,[Creao AI] Best AI-First Disruptor,36.0,3.0,3.0,3.0,5.3,2.7,8.7,0.80,0.30,no,REJECT
+24,[MLH] Best Use of Vultr,33.5,3.0,3.0,2.7,5.0,2.0,7.0,0.60,0.60,no,REJECT
+25,[Convex] Best use of Convex,31.3,3.0,3.3,3.3,2.0,2.0,8.0,0.23,0.28,no,REJECT
+26,Cal Hacks Best Planet-First Social Impact Hack,29.3,1.3,1.0,1.3,9.7,1.3,10.0,1.00,0.50,split (2/3 yes),REJECT (do not tick)
+27,[Armadin] Best Security Hack,27.8,2.0,2.0,2.0,4.7,2.0,9.7,0.67,0.33,yes,REJECT
+27,[Mana] Best Use of Mana,27.8,2.3,2.7,2.3,3.3,2.0,7.3,0.47,0.28,no,REJECT
+29,[MLH] Best Use of Snowflake API,27.7,2.0,2.7,2.0,4.0,2.0,8.0,0.50,0.50,no,REJECT
+30,[Creao AI] Best Team Empowerment,27.5,2.0,2.0,2.0,5.0,1.7,8.7,0.80,0.20,split (1/3 yes),REJECT
+31,Cal Hacks Best Beginner Hack,26.0,1.7,1.0,1.7,6.7,1.0,10.0,1.00,0.07,no,REJECT (do not tick)
+32,[Figma] Best Figma Workflow Hack,25.7,2.3,2.0,2.0,3.0,2.0,8.3,0.38,0.30,no,REJECT
+33,[Notability] Best Use of Notability,17.8,1.0,1.0,1.0,3.3,1.0,9.7,0.67,0.12,no,REJECT
+34,[Factory] Best Use of the Factory Droid SDK,17.5,1.0,1.3,1.0,3.7,1.0,6.3,0.50,0.20,yes,REJECT
+35,[Creao AI] Best One-Person Company,17.3,1.0,1.0,1.0,3.3,1.0,8.7,0.80,0.07,yes,REJECT
+36,[Apify] Best Use of Apify,16.8,1.0,1.0,1.0,3.3,1.0,7.7,0.47,0.17,yes,REJECT
+36,[Apify] Best Actor sponsored by Apify,16.8,1.0,1.0,1.0,3.3,1.0,7.7,0.47,0.17,yes,REJECT
+36,[Capital One] Best Use of Nessie,16.8,1.0,1.0,1.3,2.7,1.0,8.7,0.37,0.17,yes,REJECT
+39,[MLH] Best Use of Solana,16.7,1.0,1.0,1.0,3.0,1.0,8.3,0.40,0.30,yes,REJECT
+40,[CRS] Best Use of CRS API,16.3,1.0,1.0,1.3,2.3,1.0,8.7,0.33,0.12,yes,REJECT
+41,[Atlassian] Best Agent / Best Security Solution for Agents,15.3,1.0,1.0,1.0,2.0,1.0,8.7,0.27,0.05,yes,REJECT
+41,[Coinbase] Best Use of x402 by Coinbase,15.3,1.0,1.0,1.0,2.0,1.0,8.7,0.27,0.08,yes,REJECT
+43,[Bright Data] Best Agent/App Using Public Web Data sponsored by Bright Data,14.7,1.0,1.0,1.0,2.0,1.0,7.3,0.27,0.05,yes,REJECT
+44,[Visa] Best use of Reimagining Shopping sponsored by Visa,13.5,1.0,1.0,1.0,2.0,1.0,5.0,0.20,0.08,yes,REJECT
+45,Cal Hacks Best Solo Hack,13.2,0.3,0.3,0.3,3.7,0.3,10.0,1.00,0.00,no,REJECT (do not tick)
+46,[Hyphenate] The Hyphenated Enterprise: Autonomous Systems for Finance,12.0,1.0,1.0,1.0,1.0,1.0,5.0,0.10,0.05,yes,REJECT
+47,[SpaceXSI] Make it Legendary with SpaceXSI,11.5,0.7,0.7,0.7,1.0,0.7,9.3,0.10,0.02,yes,REJECT
