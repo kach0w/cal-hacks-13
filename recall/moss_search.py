@@ -4,6 +4,10 @@ The exact-word match in ask.match_item stays first (instant, offline); this catc
 "the thing I open the door with", "my reading things", a garbled transcript. One Moss session
 index lives in memory, built from items.json at start-up: one document per way of naming an
 item (name, detector prompt, each alias, and the optional "about" line the family writes).
+A second session index holds what happened (one document per event in the memory's log, in
+the words the page shows), added to as the log grows, so search_events() can find "when did
+the glasses go into the bag?" in the history. Both indexes stay in this process: no event or
+item text is pushed to Moss's cloud.
 
     export MOSS_PROJECT_ID=... MOSS_PROJECT_KEY=...     # from portal.usemoss.dev, or put them in .env
     python -m recall.moss_search "the thing I open the front door with"
@@ -24,11 +28,14 @@ from pathlib import Path
 log = logging.getLogger("recall")
 
 INDEX = "recall-items"
+EVENTS_INDEX = "recall-events"
 MODEL = "moss-minilm"
 MIN_SCORE = 0.4      # tuned on real questions: our items 0.52-1.0, things we don't track <= 0.24
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"   # gitignored KEY=value lines
 TIMEOUT_S = 1.0      # a slow answer is worse than "I don't have a record of that"
 READY_WAIT_S = 10.0  # a question asked while the index is still building waits this long for it
+EVENTS_TIMEOUT_S = 3.0   # the first history search also embeds the whole log; it keeps going after this
+EVENTS_MIN_SCORE = 0.3   # not tuned on real Moss yet (only on the tests' fake)
 
 
 def read_env(path) -> dict:
@@ -92,6 +99,8 @@ class MossSearch:
         session = await client.session(INDEX, MODEL, auto_load_on_init=False)
         await session.add_docs([DocumentInfo(id=i, text=t) for i, t in documents(self.items)])
         log.info("moss: indexed %d item names", len(documents(self.items)))
+        self._events = await client.session(EVENTS_INDEX, MODEL, auto_load_on_init=False)
+        self._event_ids = set()  # what's in the events index; only touched on the Moss thread
         return session
 
     def ready(self, timeout=None) -> bool:
@@ -138,6 +147,39 @@ class MossSearch:
         """The item a question means, or None when nothing clears min_score."""
         info = self.match_info(text)
         return info[0] if info else None
+
+    def search_events(self, text, events, describe, top_k=3):
+        """([(event, its words, score)] best first, query milliseconds) for a question about what
+        happened. events is the memory's log (Store.events()); the ones not yet in the index are
+        added first. ([], None) if Moss isn't ready, fails, or is still reading a long log."""
+        if not text.strip() or not self.ready(READY_WAIT_S):
+            return [], None
+        # The same event always gets the same id (db.py's unique key), so a re-read log adds
+        # only what's new, and ids from a memory that was since started over are dropped.
+        by_id = {f"{e.ts:.3f} {e.object} {e.kind}": e for e in events}
+        words = {i: describe(e) for i, e in by_id.items()}
+
+        async def q():
+            from moss import DocumentInfo, QueryOptions
+            new = [i for i in by_id if i not in self._event_ids]
+            if new:
+                self._event_ids.update(new)  # before the await: a second search won't add them again
+                try:
+                    await self._events.add_docs([DocumentInfo(id=i, text=words[i]) for i in new])
+                except Exception:
+                    self._event_ids.difference_update(new)
+                    raise
+            t0 = time.perf_counter()
+            r = await self._events.query(text, QueryOptions(top_k=top_k + 2))
+            return r, (time.perf_counter() - t0) * 1000
+        try:
+            r, ms = asyncio.run_coroutine_threadsafe(q(), self._loop).result(EVENTS_TIMEOUT_S)
+        except Exception:
+            log.warning("moss: history search failed or is still indexing", exc_info=True)
+            return [], None
+        hits = [(by_id[d.id], words[d.id], d.score) for d in r.docs
+                if d.id in by_id and d.score >= EVENTS_MIN_SCORE]
+        return hits[:top_k], ms
 
 
 def main():

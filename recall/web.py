@@ -25,6 +25,7 @@ stops, nothing is sent and the band parks its arrow by itself after a second.
 import json
 import logging
 import math
+import re
 import socket
 import threading
 import time
@@ -95,6 +96,7 @@ class Web:
 
         # Moss semantic search: whether it's on, for the page and for checking a setup
         self.routes["/moss"] = lambda params: self.moss_status()
+        self.routes["/moss/events"] = lambda params: self.moss_events(params.get("q", [""])[0])
 
     def _send_band(self, deg, dist):
         """Sends a turn to the band; returns the direction it was sent."""
@@ -152,6 +154,8 @@ class Web:
         # Moss: when it (not the exact words) worked out the item, the page says how it understood
         if understood and (a.status != "info" or t.startswith("history")):
             r["understood"] = {**understood, "name": self.query.name(oid), "words": wording(text)}
+        if t.startswith("when ") and self.query.moss:  # and for "when did...", the moment in the history
+            r["events"] = self.moss_events(text)["matches"][:1]
         return r
 
     def moss_status(self) -> dict:
@@ -160,6 +164,23 @@ class Web:
         if m is None:
             return {"on": False}
         return {"on": True, "ready": m.ready(0), "model": MOSS_MODEL, "min_score": m.min_score}
+
+    def moss_events(self, q: str) -> dict:
+        """GET /moss/events?q=: the events in the memory's log that best match a question about
+        what happened ("when did the glasses go into the bag?"), found by Moss, best first."""
+        if self.query.moss is None:
+            return {"on": False, "matches": []}
+        places = self.query.places()
+
+        def words(e):  # the log's words, without the confidence number, and never surer than the memory
+            text = self.query.describe(e, places)
+            if e.kind == "inferred_contained":
+                text = re.sub(r" — inferred \(\S+\)$", "", text).replace(" went into ", " probably went into ", 1)
+            return text
+        hits, ms = self.query.moss.search_events(q, self.memory.store.events(), words)
+        return {"on": True, "ms": None if ms is None else round(ms, 1),
+                "matches": [{"t": e.ts, "time": clock(e.ts), "text": words, "score": round(score, 2)}
+                            for e, words, score in hits]}
 
     def listen(self) -> dict:
         """The "Ask out loud" button: the laptop's mic hears one question, answered as ask() would, with what was
@@ -604,7 +625,7 @@ PAGE = """<!doctype html>
   /* [week] styles */
 
   /* Moss semantic search: how vague wording was understood, under the answer */
-  .understood { margin-top: 12px; color: var(--muted); font-size: .9375rem; overflow-wrap: anywhere; }
+  .understood { margin-top: 12px; color: var(--muted); font-size: .9375rem; white-space: pre-line; overflow-wrap: anywhere; }
 
 </style></head>
 <body>
@@ -721,7 +742,7 @@ PAGE = """<!doctype html>
   };
   const show = (r, meta) => {
     card("answer", r.answer || "Ask where something is.", meta, r.status);
-    understood(r.understood);
+    understood(r.understood, r.events);
     say(r.answer, true);
   };
 
@@ -905,10 +926,14 @@ PAGE = """<!doctype html>
   // Moss semantic search: when Moss (not the exact words) worked out which thing was meant, one
   // quiet line under the answer says how, so a care partner can tell if it heard wrong.
   $("answerCard").insertAdjacentHTML("beforeend", '<p class="understood" id="understood" hidden></p>');
-  function understood(u) {
-    const el = $("understood");
-    el.hidden = !u;
-    el.textContent = u ? `Understood “${u.words}” as ${u.name} (Moss, ${Math.max(1, Math.round(u.ms))} ms)` : "";
+  // For "when did..." questions, the moment in the history Moss found goes on the line too.
+  function understood(u, events) {
+    const el = $("understood"), ms = m => Math.max(1, Math.round(m || 0)) + " ms";
+    const lines = [];
+    if (u) lines.push(`Understood “${u.words}” as ${u.name} (Moss, ${ms(u.ms)})`);
+    if (events?.length) lines.push(`From the history: ${events[0].time}, ${events[0].text} (Moss)`);
+    el.hidden = !lines.length;
+    el.textContent = lines.join("\\n");
   }
 
   tick(); guideTick(); camTick();

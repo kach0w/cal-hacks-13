@@ -2,12 +2,14 @@
 into ask.handle and the web page. No network, no credentials."""
 import json
 import os
+import shutil
+import subprocess
 from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 
-from fakes import FRAME, ITEMS, KEYS_TABLE, S, world
+from fakes import BAG_TABLE, FRAME, GLASSES_OVER_BAG, ITEMS, KEYS_COUNTER, KEYS_TABLE, S, world
 from recall import ask, moss_search
 from recall.moss_search import MossSearch, documents
 from recall.web import Web
@@ -188,8 +190,84 @@ def test_moss_status_route(tmp_path, monkeypatch):
 
 def test_page_shows_the_moss_line():
     from recall.web import PAGE
-    assert 'id="answerCard"' in PAGE and "function understood(u)" in PAGE
-    assert "understood(r.understood)" in PAGE and "(Moss, " in PAGE
+    assert 'id="answerCard"' in PAGE and "function understood(u, events)" in PAGE
+    assert "understood(r.understood, r.events)" in PAGE and "(Moss, " in PAGE and "From the history" in PAGE
+
+
+def bag_world(tmp_path, monkeypatch):
+    """Keys on the table, then the glasses going into the blue bag."""
+    web = moss_web(tmp_path, monkeypatch)
+    memory = web.memory
+    for t in (4, 5, 6):
+        memory.update([S("keys", KEYS_TABLE), S("bag", BAG_TABLE), S("glasses", GLASSES_OVER_BAG)], FRAME, t)
+    for t in (7, 8, 9, 10):
+        memory.update([S("keys", KEYS_TABLE), S("bag", BAG_TABLE)], FRAME, t)
+    assert any(e.kind == "inferred_contained" for e in memory.store.events())
+    return web
+
+
+def test_search_events_finds_the_moment_and_indexes_only_new_events(tmp_path, monkeypatch):
+    web = bag_world(tmp_path, monkeypatch)
+    m, store = web.query.moss, web.memory.store
+    describe = web.query.describe
+    hits, ms = m.search_events("when did the glasses go into the bag", store.events(), describe)
+    e, words, score = hits[0]
+    assert e.kind == "inferred_contained" and e.object == "glasses" and "went into the blue bag" in words
+    assert 0 <= ms < 1000 and score >= moss_search.EVENTS_MIN_SCORE
+    indexed = len(m._events.docs)
+    assert indexed == len(store.events())
+    m.search_events("glasses", store.events(), describe)
+    assert len(m._events.docs) == indexed  # nothing new, nothing added
+    web.memory.update([S("keys", KEYS_COUNTER), S("bag", BAG_TABLE)], FRAME, 11)
+    web.memory.update([S("keys", KEYS_COUNTER), S("bag", BAG_TABLE)], FRAME, 12)
+    m.search_events("keys", store.events(), describe)
+    assert len(m._events.docs) == len(store.events()) > indexed
+    assert m.search_events("", store.events(), describe) == ([], None)
+
+
+def test_search_events_drops_events_no_longer_in_the_log(tmp_path, monkeypatch):
+    web = bag_world(tmp_path, monkeypatch)
+    m, events = web.query.moss, web.memory.store.events()
+    m.search_events("glasses into the bag", events, web.query.describe)
+    kept = [e for e in events if e.kind != "inferred_contained"]  # as if the memory started over
+    hits, _ = m.search_events("glasses into the bag", kept, web.query.describe)
+    assert all(e.kind != "inferred_contained" for e, _, _ in hits)
+
+
+def test_search_events_survives_moss_failing(tmp_path, monkeypatch):
+    web = bag_world(tmp_path, monkeypatch)
+    m = web.query.moss
+
+    async def broken(docs):
+        raise RuntimeError("index full")
+    m._events.add_docs = broken
+    assert m.search_events("glasses", web.memory.store.events(), web.query.describe) == ([], None)
+    assert m._event_ids == set()  # tried again next time
+    assert search(fail=True).search_events("glasses", web.memory.store.events(), web.query.describe) == ([], None)
+
+
+def test_moss_events_route_and_when_questions(tmp_path, monkeypatch):
+    web = bag_world(tmp_path, monkeypatch)
+    r = web.routes["/moss/events"]({"q": ["when did the glasses go into the bag"]})
+    assert r["on"] and isinstance(r["ms"], float)
+    top = r["matches"][0]
+    assert top["text"] == "glasses probably went into the blue bag" and top["time"] and top["t"] == 9
+    assert json.loads(json.dumps(r)) == r
+    assert web.routes["/moss/events"]({}) == {"on": True, "ms": None, "matches": []}
+    a = web.ask("When did the glasses go into the bag?")
+    assert "blue bag" in a["answer"] and [(e["t"], e["text"]) for e in a["events"]] == [(top["t"], top["text"])]
+    assert "events" not in web.ask("where are my glasses")
+    off = moss_web(tmp_path / "off", monkeypatch, moss=None)
+    assert off.routes["/moss/events"]({"q": ["glasses"]}) == {"on": False, "matches": []}
+    assert "events" not in off.ask("when did the glasses go into the bag")
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="needs node to parse the page's script")
+def test_page_script_parses(tmp_path):
+    from recall.web import PAGE
+    js = tmp_path / "page.js"
+    js.write_text(PAGE.split("<script>")[1].split("</script>")[0])
+    assert subprocess.run(["node", "--check", str(js)], capture_output=True).returncode == 0
 
 
 @pytest.mark.skipif(not (os.environ.get("MOSS_PROJECT_ID") and os.environ.get("MOSS_PROJECT_KEY")),
