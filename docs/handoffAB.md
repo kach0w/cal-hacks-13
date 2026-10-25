@@ -89,15 +89,18 @@ All files go in **`data/room/`**, written by one command, `uv run tools/setup_ro
 One 1280×720 frame from the corner camera, taken at registration time with the markers
 visible. Used to check the overlay and to detect a bumped camera.
 
-### 5. `zones3d.json` — optional
+### 5. `surfaces.json` — the named surfaces (DESIGN §6.1)
 
 ```json
 [
-  {"name": "kitchen counter", "min": [x, y, z], "max": [x, y, z], "prep": "on"}
+  {"name": "kitchen counter", "box_min": [x, y, z], "box_max": [x, y, z], "prep": "on", "top": y}
 ]
 ```
 
-Axis-aligned boxes in the world frame. Replace the image-space zones once positions are 3D.
+Axis-aligned boxes in the world frame. They replace the image-space zones once positions are 3D.
+Written by `python -m recall.surfaces name` (drag boxes on `plan.png`; heights come from the scan).
+`top` is the surface's height; without it, `box_min`'s y. A hand-made `zones3d.json` with `min` /
+`max` instead of `box_min` / `box_max` is read too.
 
 ---
 
@@ -106,7 +109,8 @@ Axis-aligned boxes in the world frame. Replace the image-space zones once positi
 - Builds `data/room/xyz_map.npy` by ray-casting every camera pixel into `room.glb`
   (Open3D `RaycastingScene`), after undistorting with `K` + `dist`.
 - `pixel_to_world(u, v)` → lookup in `xyz_map`; `floor_hit(u, v)` → ray ∩ plane y = 0.
-- Plugs it in: `Memory(..., pixel_to_world=room.pixel_to_world)` fills `xyz` in the state.
+- Plugs it in: `Memory(..., pixel_to_world=room.pixel_to_world)` fills `xyz` in the state, and
+  each object's surface is the `surfaces.json` box its `xyz` falls in.
 - Re-registers after a bump from `markers.json` + a fresh frame.
 
 ## Checks

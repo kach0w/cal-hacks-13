@@ -387,7 +387,7 @@ No websockets.
 |---|---|---|
 | Setup | Axes wrong; world mirrored | `scan_to_room.py`'s depth check; the overlay looks wrong |
 | Setup | Camera bumped | Re-run `setup_room.py`; the markers are still up |
-| Setup | Polycam's export doesn't line up with its own LiDAR | Click marker corners on the mesh (CAMERA.md E3); last resort, our own ARKit app |
+| Setup | Polycam's export doesn't line up with its own LiDAR | Click marker corners on the mesh (CAMERA.md E1); last resort, our own ARKit app |
 | Setup | A marker isn't detected by the camera | It's seen edge-on or too small: move it to a wall the camera faces, or closer |
 | Map | Furniture moved since the scan | Rescan (§2) |
 | Perception | Small objects missed at range | `range_test.py` early; bigger props; `DETECT_IMGSZ` 1280 |

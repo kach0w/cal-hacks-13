@@ -179,7 +179,7 @@ def choose_convention(vertices, faces, align, frames):
     best = results[0]
     if not best[0] < DEPTH_OK_M:
         sys.exit(f"FAIL: no reading lines the mesh up with LiDAR depth within {DEPTH_OK_M * 100:.0f} cm. "
-                 "Fall back to clicking marker corners (CAMERA.md E3).")
+                 "Fall back to clicking marker corners (CAMERA.md E1).")
     return best[2], best[3], best[5], best[0]
 
 

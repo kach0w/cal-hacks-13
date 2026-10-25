@@ -1,12 +1,24 @@
-*.pt
-range_log.csv
-__pycache__/
-
-
-p.md
+# local data; data/reference/, the lens files in data/cameras/ and Person A's data/room/ deliverables are committed
+data/*
+!data/reference/
+!data/cameras/
+!data/room/
+# the scan export (it holds the home's GPS position), calibration photos and derived caches
 data/room/scan_raw*/
-data/room/calib_frames/
-data/room/*.tmp
-*.zip
 data/room/calib_frames*/
 data/room/*_session1*
+data/room/*.tmp
+data/room/xyz_map.npy
+data/room/xyz_map.sha1
+data/room/surfaces_drawn.jpg
+data/room/surfaces.png
+data/room/surfaces_camera.jpg
+*.zip
+# environment and model weights
+.venv/
+__pycache__/
+*.pt
+mobileclip*.ts
+.DS_Store
+range_log.csv
+p.md

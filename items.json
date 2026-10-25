@@ -1,0 +1,47 @@
+{
+  "keys": {
+    "name": "keys",
+    "prompt": "keys on a red lanyard",
+    "aliases": ["key", "car keys", "house keys", "lanyard"],
+    "plural": true,
+    "container": false,
+    "min_score": null,
+    "reference": "reference/keys.png"
+  },
+  "glasses": {
+    "name": "glasses",
+    "prompt": "black eyeglasses",
+    "aliases": ["eyeglasses", "specs", "reading glasses"],
+    "plural": true,
+    "container": false,
+    "min_score": null,
+    "reference": "reference/glasses.png"
+  },
+  "remote": {
+    "name": "remote",
+    "prompt": "black tv remote control",
+    "aliases": ["remote control", "tv remote", "clicker"],
+    "plural": false,
+    "container": false,
+    "min_score": null,
+    "reference": "reference/remote.png"
+  },
+  "wallet": {
+    "name": "wallet",
+    "prompt": "light blue wallet",
+    "aliases": ["purse"],
+    "plural": false,
+    "container": false,
+    "min_score": null,
+    "reference": "reference/wallet.png"
+  },
+  "bag": {
+    "name": "bag",
+    "prompt": "tote bag",
+    "aliases": ["tote", "shopping bag", "paper bag"],
+    "plural": false,
+    "container": true,
+    "min_score": null,
+    "reference": null
+  }
+}
