@@ -247,3 +247,26 @@ def test_mic_button_one_at_a_time_and_stop_over_http(tmp_path):
     assert get("/listen?stop=1") == {"ok": True}        # pressing 🎤 again stops it
     t.join(5)
     assert first["heard"] == "where are my keys" and "table" in first["answer"]
+
+
+# --- the band's button: the 🎤 button's job, the answer spoken on the laptop ------------------
+def test_band_button_asks_out_loud_and_the_laptop_speaks_the_answer(tmp_path):
+    web = keys_on_table(tmp_path, FakeMic())
+    said = []
+    web.speak = said.append
+    web.band_pressed()
+    assert len(said) == 1 and "table" in said[0]
+    assert web.guiding["item"] == "keys"
+
+
+def test_band_button_pressed_again_stops_listening(tmp_path):
+    mic = FakeMic(hold=True)
+    web = keys_on_table(tmp_path, mic)
+    said = []
+    web.speak = said.append
+    first = threading.Thread(target=web.band_pressed)
+    first.start()
+    assert mic.started.wait(5)
+    web.band_pressed()  # the second press, while it listens
+    first.join(5)
+    assert not first.is_alive() and "table" in said[0]

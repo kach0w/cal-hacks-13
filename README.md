@@ -34,8 +34,9 @@ A clone has no room, no lens calibration and no memory: each setup makes its own
    Settings. For the Raspberry Pi band (`firmware/pi_band.py`) give its wifi host instead:
    `--band raspberrypi.local`. Models download on the first run.
 
-   Add `--voice` to ask out loud on the laptop: press Enter in that terminal, ask, and the answer
-   is spoken and the guidance starts. On its own, without the camera:
+   To ask out loud, press the band's button (GPIO 17 to GND) or the page's 🎤, then speak toward
+   the laptop: the answer is spoken and the guidance starts; press again to stop listening sooner.
+   Add `--voice` to ask from the terminal too: press Enter there, then ask. On its own, without the camera:
    `.venv/bin/python -m recall.voice --memory data/sim/real` (see `recall/voice.py`).
 
 If the webcam is moved later, re-run `uv run tools/register_camera.py --camera <webcam name>`

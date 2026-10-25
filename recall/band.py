@@ -5,6 +5,9 @@ a host such as the Raspberry Pi band (firmware/pi_band.py).
     link = connect("sixsevendemons")      # Bluetooth: the ESP32 band's name
     link = connect("raspberrypi.local")   # wifi: a host name or IP address (it has a dot)
     link.send(-30, 50)                    # never blocks; only the newest packet matters
+    link = connect("sixsevendemons", on_press=f)   # f() runs on its own thread at each button press
+
+Over Bluetooth the band's button comes back the other way: "press" on its UART TX characteristic.
 
 Bluetooth writes to the band's Nordic UART service, the one phone apps such as nRF Connect can
 also write to when testing. macOS asks for Bluetooth permission for the terminal the first time;
@@ -20,6 +23,7 @@ log = logging.getLogger("recall")
 
 NAME = "sixsevendemons"                              # what the ESP32 band advertises
 UART_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"     # its Nordic UART RX characteristic: packets go here
+UART_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"     # and TX: it notifies button presses here
 UDP_PORT = 4210                                      # firmware/pi_band.py listens here
 RETRY_S = 5                                          # look for a missing band again this often
 
@@ -33,18 +37,20 @@ def is_host(target: str) -> bool:
     return "." in target
 
 
-def connect(target=NAME):
-    """A link to the band, looking for it in the background until it's found."""
-    return Udp(target) if is_host(target) else Ble(target)
+def connect(target=NAME, on_press=None):
+    """A link to the band, looking for it in the background until it's found. on_press: called at
+    each press of the band's button (Bluetooth only; the Raspberry Pi band has none)."""
+    return Udp(target) if is_host(target) else Ble(target, on_press)
 
 
 class Ble:
     """Bluetooth LE to the band, on its own thread: finds it by name, connects, writes each packet
-    without waiting for a reply, and reconnects when the link drops. scanner and client stand in
-    for bleak's BleakScanner and BleakClient in tests."""
+    without waiting for a reply, and reconnects when the link drops. Each button press runs
+    on_press on a thread of its own, so a long question never holds up the link. scanner and client
+    stand in for bleak's BleakScanner and BleakClient in tests."""
 
-    def __init__(self, name=NAME, scanner=None, client=None):
-        self.name, self.connected = name, False
+    def __init__(self, name=NAME, on_press=None, scanner=None, client=None):
+        self.name, self.connected, self.on_press = name, False, on_press
         self._scanner, self._client = scanner, client
         self._packet = None
         self._loop = self._wake = None
@@ -80,6 +86,8 @@ class Ble:
                 continue
             try:
                 async with self._client(device) as client:
+                    if self.on_press is not None:
+                        await client.start_notify(UART_TX, self._pressed)
                     self.connected, warned = True, False
                     log.info("band: connected to %s over Bluetooth", self.name)
                     while client.is_connected:
@@ -94,6 +102,10 @@ class Ble:
             finally:
                 self.connected = False
             log.info("band: looking for %s again", self.name)
+
+    def _pressed(self, _characteristic, data):
+        log.info("band: button pressed (%s)", bytes(data).decode(errors="replace"))
+        threading.Thread(target=self.on_press, name="band-button", daemon=True).start()
 
 
 class Udp:

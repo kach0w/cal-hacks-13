@@ -1,5 +1,5 @@
-"""Ask out loud on this laptop: press Enter, ask, hear the answer. Step 1 of the voice plan: the
-band's button takes Enter's place later; everything after it stays.
+"""Ask out loud on this laptop: press Enter, ask, hear the answer. The band's button does the same
+over Bluetooth (web.Web.band_pressed, with --web --band); everything after the press is shared.
 
     python -m recall.voice                            # ask the live memory (data/)
     python -m recall.voice --memory data/sim/real     # ask another memory, e.g. the simulated table
