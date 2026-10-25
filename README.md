@@ -30,6 +30,10 @@ A clone has no room, no lens calibration and no memory: each setup makes its own
    printed link on a phone on the same wifi. The band (`firmware/band`, or `firmware/pi_band.py`)
    must be on that wifi too. Models download on the first run.
 
+   Add `--voice` to ask out loud on the laptop: press Enter in that terminal, ask, and the answer
+   is spoken and the guidance starts. On its own, without the camera:
+   `.venv/bin/python -m recall.voice --memory data/sim/real` (see `recall/voice.py`).
+
 If the webcam is moved later, re-run `uv run tools/register_camera.py --camera <webcam name>`
 with the markers still up. To start the memory over, stop live and delete `data/state.json`,
 `data/events.jsonl`, `data/heartbeat.json` and `data/photos/`.

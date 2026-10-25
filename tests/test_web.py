@@ -1,6 +1,11 @@
-"""The web page over a fake memory: board state, ask + guidance start, container targets, HTTP."""
+"""The web page over a fake memory: board state, ask + guidance start, container targets, HTTP,
+and the 🎤 button over a fake mic."""
 import json
+import threading
+import time
 import urllib.request
+
+import pytest
 
 from fakes import BAG_TABLE, FRAME, GLASSES_OVER_BAG, KEYS_TABLE, S, world
 from recall.camera import Frame
@@ -167,3 +172,61 @@ def test_room_guidance_keeps_showing_the_last_estimate(tmp_path):
     shown = np.zeros((720, 1280, 3), np.uint8)
     web._point_in_room("keys", shown, shown)
     assert (shown == GREEN).all(axis=2).sum() > 100
+
+
+# --- the 🎤 button: the laptop's mic (fake here) and Whisper (fake here) ------------------------
+class FakeMic:
+    """Hears `audio`; with hold=True it keeps listening until the page presses stop."""
+    def __init__(self, audio="a clip", hold=False, broken=False):  # the fake Whisper ignores it
+        self.audio, self.hold, self.broken = audio, hold, broken
+        self.started = threading.Event()
+
+    def listen(self, stop):
+        if self.broken:
+            raise RuntimeError("Error querying device -1")
+        self.started.set()
+        while self.hold and not stop():
+            time.sleep(0.01)
+        return self.audio
+
+
+def keys_on_table(tmp_path, mic, heard="where are my keys"):
+    web, memory = make(tmp_path)
+    for t in (1, 2, 3):
+        memory.update([S("keys", KEYS_TABLE)], FRAME, t)
+    web.mic, web.stt = mic, lambda audio: heard
+    return web
+
+
+def test_mic_button_answers_what_the_laptop_heard_and_guides(tmp_path):
+    web = keys_on_table(tmp_path, FakeMic())
+    r = web.listen()
+    assert r["heard"] == "where are my keys" and "table" in r["answer"]
+    assert web.guiding["item"] == "keys"
+
+
+def test_mic_button_when_nobody_spoke_or_nothing_was_made_out(tmp_path):
+    r = keys_on_table(tmp_path, FakeMic(audio=None)).listen()
+    assert r["heard"] is None and "didn't hear anything" in r["answer"]
+    web = keys_on_table(tmp_path, FakeMic(), heard="")    # nothing legible: never sent as a question
+    web.ask = lambda text: pytest.fail(f"asked {text!r}")
+    r = web.listen()
+    assert r["heard"] is None and r["answer"] == "Sorry, I didn't catch that."
+    assert web.guiding["item"] is None
+    r = keys_on_table(tmp_path, FakeMic(broken=True)).listen()
+    assert "microphone isn't working" in r["answer"]
+
+
+def test_mic_button_one_at_a_time_and_stop_over_http(tmp_path):
+    mic = FakeMic(hold=True)
+    web = keys_on_table(tmp_path, mic)
+    url = web.start(port=0).replace(web.start.__globals__["lan_ip"](), "127.0.0.1")
+    get = lambda p: json.loads(urllib.request.urlopen(url + p, timeout=5).read())
+    first = {}
+    t = threading.Thread(target=lambda: first.update(get("/listen")))
+    t.start()
+    assert mic.started.wait(5)
+    assert get("/listen") == {"busy": True}             # a second press elsewhere
+    assert get("/listen?stop=1") == {"ok": True}        # pressing 🎤 again stops it
+    t.join(5)
+    assert first["heard"] == "where are my keys" and "table" in first["answer"]
