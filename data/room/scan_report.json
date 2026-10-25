@@ -1,27 +1,23 @@
 {
-  "depth_median_m": 0.011373004120164065,
-  "marker_size_m": 0.168,
+  "depth_median_m": 0.013518688220238217,
+  "marker_size_m": 0.1614,
   "markers": {
     "0": {
-      "sightings": 24,
-      "spread_m": 0.0201
+      "sightings": 5,
+      "spread_m": 0.014
     },
     "3": {
       "sightings": 7,
-      "spread_m": 0.024
+      "spread_m": 0.0149
     },
     "4": {
-      "sightings": 10,
-      "spread_m": 0.0365
-    },
-    "5": {
-      "sightings": 15,
-      "spread_m": 0.0063
+      "sightings": 9,
+      "spread_m": 0.0198
     }
   },
   "warnings": [
-    "marker 0's corners only agree to 20 mm across the scan",
-    "marker 3's corners only agree to 24 mm across the scan",
-    "marker 4's corners only agree to 36 mm across the scan"
+    "marker 0's corners only agree to 14 mm across the scan",
+    "marker 3's corners only agree to 15 mm across the scan",
+    "marker 4's corners only agree to 20 mm across the scan"
   ]
 }
