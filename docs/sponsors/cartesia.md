@@ -64,7 +64,7 @@ Optional: `CARTESIA_VOICE_ID=<voice id>` to try another voice from the Voice Lib
 
 1. Start live with the key set and open the page. Ask "where are my keys?": the answer is spoken in
    the Cartesia voice.
-2. Stand in front of the camera and turn away from the keys: the dial guides you, and "To your left"
+2. Stand in front of the camera and turn away from the keys: the arrow guides you, and "To your left"
    plays instantly (made at start-up).
 3. Press the band's button and ask out loud: the laptop answers in the same voice.
 4. Unset the key and restart: everything still talks, with the built-in voices.

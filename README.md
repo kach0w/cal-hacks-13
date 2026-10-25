@@ -30,7 +30,7 @@ Camera pipeline: [`docs/CAMERA.md`](docs/CAMERA.md).
 - **Points the way.** After a question, Recall finds the person with a pose model, works out
   where they are standing and which way their chest faces, and sends the band a direction. The
   arrow turns toward the item (or the bag it's in), and the web page shows the same direction on
-  a dial, with "To your left" spoken aloud as it changes.
+  an arrow, with "To your left" spoken aloud as it changes.
 - **Gives the care partner a view.** A web page, open on any phone or laptop on the same wifi,
   shows where each thing is, how sure Recall is, whether the camera is live, a timeline of
   everything that moved, and a "This week" panel: how often each thing went out of sight, per

@@ -96,7 +96,7 @@ a tiny `dir,dist` packet.
 arrow, wiggles when you've arrived, and centres itself if packets stop, because a frozen arrow is
 a lie. The button asks a question through the laptop's mic.
 
-**The page.** A dependency-free web page served by the laptop: an ask box, a live compass dial
+**The page.** A dependency-free web page served by the laptop: an ask box, a live guidance arrow
 while guiding, the live camera, the "where things are" board in plain words, the timeline, the
 "This week" panel and the "Ask about the day" card.
 
