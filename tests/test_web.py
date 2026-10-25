@@ -3,6 +3,7 @@ and the 🎤 button over a fake mic."""
 import json
 import threading
 import time
+import urllib.error
 import urllib.request
 
 import pytest
@@ -90,6 +91,18 @@ def test_http_routes(tmp_path):
     assert json.loads(get("/state"))["places"] == ["kitchen counter", "table"]
     assert "table" in json.loads(get("/ask?q=where%20are%20my%20keys"))["answer"]
     assert json.loads(get("/guide"))["item"] == "keys"
+
+
+def test_photos_never_reach_the_page(tmp_path):
+    web, memory = make(tmp_path)
+    for t in (1, 2, 3):
+        memory.update([S("keys", KEYS_TABLE)], FRAME, t)
+    photo = memory.state["keys"].photo_path
+    assert photo and "photo" not in web.ask("where are my keys")
+    url = web.start(port=0).replace(web.start.__globals__["lan_ip"](), "127.0.0.1")
+    with pytest.raises(urllib.error.HTTPError, match="404"):
+        urllib.request.urlopen(url + "/photo/" + photo)
+    assert b"/photo/" not in urllib.request.urlopen(url + "/").read()
 
 
 def test_guidance_goes_to_the_band(tmp_path):

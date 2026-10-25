@@ -14,7 +14,7 @@ works from any device on the wifi; press it again to stop listening sooner. The 
 back by the page. With MOSS_PROJECT_ID/MOSS_PROJECT_KEY set, Moss resolves vague wording to an item
 (moss_search.py).
 
-Routes: /  /state  /ask?q=  /listen  /listen?stop=1  /guide  /cam.jpg  /photo/<path>
+Routes: /  /state  /ask?q=  /listen  /listen?stop=1  /guide  /cam.jpg
 
 With --band, every guidance update also goes to the necklace (firmware/band) as a UDP
 packet "dir,dist": dir in degrees, + = to the person's right; dist 0..100. The servo reaches
@@ -28,7 +28,7 @@ import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, urlparse
 
 import cv2
 
@@ -148,12 +148,12 @@ class Web:
         try:
             a = handle(text, self.query)
         except ValueError as e:
-            return {"answer": str(e), "status": "info", "photo": None}
+            return {"answer": str(e), "status": "info"}
         oid = find_item(self.query, text)
         if oid and a.status in ("observed", "inferred", "unknown"):
             with self._lock:
                 self.guiding.update(item=oid, since=time.time(), dir=None, target=None, note=None)
-        return {"answer": a.text, "status": a.status, "photo": a.photo_path}
+        return {"answer": a.text, "status": a.status}
 
     def listen(self) -> dict:
         """The 🎤 button: the laptop's mic hears one question, answered as ask() would, with what was
@@ -166,12 +166,11 @@ class Web:
             heard = self.stt(audio) if audio is not None else None
         except Exception as e:  # no mic, no permission, no Whisper: say so on the page
             log.warning("voice: %s", e)
-            return {"heard": None, "answer": "The laptop's microphone isn't working.", "status": "info",
-                    "photo": None}
+            return {"heard": None, "answer": "The laptop's microphone isn't working.", "status": "info"}
         finally:
             self._listening.release()
         if not heard:
-            return {"heard": None, "status": "info", "photo": None,
+            return {"heard": None, "status": "info",
                     "answer": "Sorry, I didn't catch that." if audio is not None
                     else "I didn't hear anything. Speak toward the laptop."}
         log.info("voice: heard %r", heard)
@@ -349,9 +348,6 @@ class Web:
                     with web._lock:
                         jpg = web.cam_jpg
                     self._send(jpg, "image/jpeg") if jpg else self.send_error(404)
-                elif url.path.startswith("/photo/"):
-                    p = web.memory.store.photo_file(unquote(url.path[len("/photo/"):]))
-                    self._send(p.read_bytes(), "image/jpeg") if p else self.send_error(404)
                 else:
                     self.send_error(404)
 
@@ -410,7 +406,6 @@ PAGE = """<!doctype html>
   #mic { background: var(--card); border: 1px solid var(--line); padding: 12px 14px; }
   #mic.on { background: #d0342f; border-color: #d0342f; }
   #answer { font-size: 1.25rem; font-weight: 600; min-height: 1.5em; white-space: pre-line; margin: 12px 0; }
-  #photo { max-width: 100%; border-radius: 10px; display: block; }
   #guide { display: flex; align-items: center; gap: 18px; background: var(--card); border: 1px solid var(--line);
            border-radius: 12px; padding: 14px 18px; margin-top: 12px; }
   #arrow { width: 72px; height: 72px; flex: none; transition: transform 150ms linear; }
@@ -438,7 +433,6 @@ PAGE = """<!doctype html>
     <section>
       <form id="ask"><input id="q" placeholder="Where are my keys?" autocomplete="off"><button type="button" id="mic" title="Ask out loud (the laptop listens)">🎤</button></form>
       <p id="answer"></p>
-      <img id="photo" hidden alt="Where it was last seen">
       <div id="guide" hidden>
         <svg id="arrow" viewBox="0 0 100 100"><polygon points="50,6 66,52 54,46 54,94 46,94 46,46 34,52" fill="var(--accent)"/></svg>
         <div><div id="guideWords">Looking for you…</div><div id="guideSub"></div></div>
@@ -458,8 +452,6 @@ PAGE = """<!doctype html>
 
   const show = r => {
     $("answer").textContent = r.answer;
-    $("photo").hidden = !r.photo;
-    if (r.photo) $("photo").src = "/photo/" + encodeURIComponent(r.photo);
     say(r.answer);
   };
 
