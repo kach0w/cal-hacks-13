@@ -112,7 +112,11 @@ def test_guidance_goes_to_the_band(tmp_path):
     rx.settimeout(2)
     cfg, store, memory, query = world(tmp_path)
     web = Web(cfg, memory.items, memory, StubPipeline(), memory.places, band="127.0.0.1")
-    web.band = ("127.0.0.1", rx.getsockname()[1])
+    import time
+    from recall.band import Udp
+    web.band = Udp("127.0.0.1", rx.getsockname()[1])  # what start() opens for a wifi host, on a test port
+    while not web.band.connected:
+        time.sleep(0.01)
     for t in (1, 2, 3):
         memory.update([S("keys", KEYS_TABLE)], FRAME, t)
     web.ask("where are my keys")

@@ -24,11 +24,15 @@ A clone has no room, no lens calibration and no memory: each setup makes its own
 6. **Name the surfaces:** `.venv/bin/python -m recall.surfaces name`.
 7. **Run:**
 
-       .venv/bin/python -m recall.live --web --band recall-band.local --set SHOULDER_HEIGHT_M=1.45
+       .venv/bin/python -m recall.live --web --band --set SHOULDER_HEIGHT_M=1.45
 
    `SHOULDER_HEIGHT_M` is the guided person's shoulder height, about 0.82 × their height. Open the
-   printed link on a phone on the same wifi. The band (`firmware/band`, or `firmware/pi_band.py`)
-   must be on that wifi too. Models download on the first run.
+   printed link on a phone on the same wifi. `--band` connects over Bluetooth to the ESP32 band,
+   `sixsevendemons` (flash `firmware/band/band.ino`: an ESP32 with Bluetooth, not the S2, plus the
+   ESP32Servo library; check it with `.venv/bin/python tools/band_test.py sixsevendemons sweep`).
+   macOS asks to let the terminal use Bluetooth the first time; don't pair the band in System
+   Settings. For the Raspberry Pi band (`firmware/pi_band.py`) give its wifi host instead:
+   `--band raspberrypi.local`. Models download on the first run.
 
    Add `--voice` to ask out loud on the laptop: press Enter in that terminal, ask, and the answer
    is spoken and the guidance starts. On its own, without the camera:

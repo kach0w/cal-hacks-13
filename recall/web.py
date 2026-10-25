@@ -16,8 +16,8 @@ back by the page. With MOSS_PROJECT_ID/MOSS_PROJECT_KEY set, Moss resolves vague
 
 Routes: /  /state  /ask?q=  /listen  /listen?stop=1  /guide  /cam.jpg
 
-With --band, every guidance update also goes to the necklace (firmware/band) as a UDP
-packet "dir,dist": dir in degrees, + = to the person's right; dist 0..100. The servo reaches
+With --band, every guidance update also goes to the band (recall/band.py: Bluetooth to the ESP32,
+or wifi to a host) as "dir,dist": dir in degrees, + = to the person's right; dist 0..100. The servo reaches
 ±90, so further round the arrow waves at that side's edge: 'turn around, this way'. When guidance
 stops, nothing is sent and the band parks its arrow by itself after a second.
 """
@@ -33,6 +33,7 @@ from urllib.parse import parse_qs, urlparse
 import cv2
 
 from .ask import find_item, handle
+from .band import connect as connect_band
 from .body import Body, PoseModel, draw
 from .moss_search import MossSearch
 from .guide import SHOULDER_M, Guide, words
@@ -45,8 +46,6 @@ log = logging.getLogger("recall")
 PORT = 8000
 GUIDE_FOR_S = 60       # stop guiding this long after a question
 GUIDE_EVERY_S = 0.1    # pause between the guidance thread's looks
-BAND_PORT = 4210       # firmware/band/band.ino listens here
-BAND_RETRY_S = 5       # look the band up again this often until it's on the wifi
 BAND_HOLD_S = 1.5      # person lost for a moment: keep sending the last direction this long
 BAND_BEHIND_DEG = 150  # further round than this either way, the band keeps the side it was on
 BAND_REACH_DEG = 90    # the servo's travel each side of ahead (firmware/band)
@@ -77,27 +76,12 @@ class Web:
                         "target": None, "note": None, "t": 0.0}
         self.cam_jpg = None
         self.band_host = band
-        self.band = None  # (ip, port) of the necklace once --band's host is found
+        self.band = None  # the link to the band (recall/band.py), opened by start() when --band was given
         self.band_side = 0  # band_dir's side, 0 before anything is sent
         self._waving = False  # which end of the wave the last packet past the servo's reach was
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.mic, self.stt = Mic(), Transcriber(items)  # the 🎤 button's; warm_voice() readies them
         self._listening = threading.Lock()  # one question at a time from the page
         self._stop_listening = threading.Event()
-
-    def _find_band(self):
-        """Looks the band up until it answers: it may join the wifi after we start."""
-        warned = False
-        while self.band is None:
-            try:
-                self.band = (socket.gethostbyname(self.band_host), BAND_PORT)
-                log.info("band: sending guidance to %s:%d", *self.band)
-            except OSError:
-                if not warned:
-                    log.warning("band: can't find %s yet; guidance stays on the page until it's on the wifi",
-                                self.band_host)
-                    warned = True
-                time.sleep(BAND_RETRY_S)
 
     def _send_band(self, deg, dist):
         """Sends a turn to the band; returns the direction it was sent."""
@@ -108,10 +92,7 @@ class Web:
             deg = math.copysign(BAND_REACH_DEG - BAND_WAVE_DEG * self._waving, deg)
             self._waving = not self._waving
         if self.band:
-            try:
-                self._sock.sendto(f"{int(round(deg))},{int(dist)}".encode(), self.band)
-            except OSError:  # band off or out of range: the page keeps guiding
-                pass
+            self.band.send(deg, dist)
         return deg
 
     def _hold(self):
@@ -368,7 +349,7 @@ class Web:
         threading.Thread(target=server.serve_forever, name="web", daemon=True).start()
         threading.Thread(target=self._guide_loop, name="guidance", daemon=True).start()
         if self.band_host:
-            threading.Thread(target=self._find_band, name="band", daemon=True).start()
+            self.band = connect_band(self.band_host)
         url = f"http://{lan_ip()}:{server.server_address[1]}"  # port 0 = any free port (tests)
         log.info("web page: %s", url)
         return url

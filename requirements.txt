@@ -9,6 +9,7 @@ pytest
 moss                       # Moss semantic search: which item a vague question means (optional at runtime)
 sounddevice                # recall.voice: the laptop mic
 faster-whisper             # recall.voice: speech to text on the laptop (Whisper, plus the Silero VAD it ships)
+bleak                      # Bluetooth LE to the band (recall/band.py)
 # Task 4 (HTTP):
 fastapi
 uvicorn

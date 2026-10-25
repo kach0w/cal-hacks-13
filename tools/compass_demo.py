@@ -1,14 +1,15 @@
 """Camera -> necklace arrow, with a clicked fake target.
 
 Tracks the person's shoulders with a pose model, works out which way their body faces,
-and sends the direction to the clicked target to the necklace as "dir,dist" over UDP.
+and sends the direction to the clicked target to the necklace as "dir,dist" (recall/band.py:
+Bluetooth to the ESP32 band, or wifi to a host such as the Raspberry Pi band).
 
     .venv/bin/python tools/compass_demo.py                       # phone only, camera in front
     .venv/bin/python tools/compass_demo.py --view top            # camera looking straight down
     .venv/bin/python tools/compass_demo.py --find "keys,glasses,bag"   # real objects, keys 1-9 pick one
     .venv/bin/python tools/compass_demo.py --find "keys,wallet" --rooms "kitchen:1,bedroom:0"   # + Clue board at /board
-    .venv/bin/python tools/compass_demo.py recall-band.local
-    .venv/bin/python tools/compass_demo.py 172.20.10.6 --cam 1
+    .venv/bin/python tools/compass_demo.py sixsevendemons
+    .venv/bin/python tools/compass_demo.py raspberrypi.local --cam 1
 
 Click the video to set the target. Keys: c = clear target, f = flip facing,
 m = mirror left/right (camera facing the person instead of looking down),
@@ -20,7 +21,7 @@ import argparse
 import json
 import math
 import os
-import socket
+import sys
 import time
 
 import cv2
@@ -30,7 +31,9 @@ from ultralytics import YOLO
 import phone_compass
 from room_status import RoomStatus
 
-PORT = 4210
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from recall.band import connect  # noqa: E402
+
 SEND_HZ = 15
 NOSE, L_EAR, R_EAR, L_SHOULDER, R_SHOULDER = 0, 3, 4, 5, 6  # COCO keypoint indexes
 NOSE_MIN_OFFSET = 0.08  # nose must stick out this much (x shoulder width) to count
@@ -258,7 +261,8 @@ def signed_angle(facing, to_target):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("band", nargs="?", default=None, help="band IP or recall-band.local; leave out for phone only")
+    ap.add_argument("band", nargs="?", default=None,
+                    help="the band's Bluetooth name (sixsevendemons) or a wifi host; leave out for phone only")
     ap.add_argument("--cam", type=int, default=0)
     ap.add_argument("--model", default="yolo11n-pose.pt")
     ap.add_argument("--find", default="",
@@ -277,13 +281,8 @@ def main():
     ap.add_argument("--mirror", action="store_true", help="swap left/right, for a camera facing the person")
     args = ap.parse_args()
 
-    try:
-        addr = (socket.gethostbyname(args.band), PORT) if args.band else None
-    except socket.gaierror:
-        print(f"band: can't find {args.band}, running phone-only")
-        addr = None
+    link = connect(args.band) if args.band else None  # looks for the band in the background
     phone_url = phone_compass.start()
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     model = None if args.card else YOLO(args.model)
     items = {} if args.no_find else load_items(args.find)
     names = list(items)
@@ -319,7 +318,7 @@ def main():
     facing = None
     flip = False
     mirror = args.mirror
-    band_ok = addr is not None
+    band_ok = False
     servo_flip = False  # r key: reverse only the servo, for when it mirrors the dial
     last_send = 0.0
     last_good = 0.0
@@ -436,12 +435,9 @@ def main():
                 now = time.time()
                 if now - last_send >= 1 / SEND_HZ:
                     servo_dir = -direction if servo_flip else direction
-                    try:
-                        if addr is not None:
-                            sock.sendto(f"{int(round(servo_dir))},{dist}".encode(), addr)
-                            band_ok = True
-                    except OSError:
-                        band_ok = False  # band off or unreachable; keep running for the phone
+                    if link is not None:
+                        link.send(servo_dir, dist)
+                    band_ok = link is not None and link.connected  # off or out of range: phone only
                     last_send = now
         elif person is None:
             facing = None

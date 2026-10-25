@@ -18,5 +18,3 @@ range_log.csv
 p.md
 # API keys (MOSS_PROJECT_ID / MOSS_PROJECT_KEY)
 .env
-# band firmware wifi password
-firmware/band/secrets.h

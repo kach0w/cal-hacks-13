@@ -4,6 +4,7 @@
     python -m recall.live --show                # + overlay window (q quits)
     python -m recall.live --web                 # + web page: board, ask box, guidance
     python -m recall.live --voice               # + ask out loud here (Enter); starts the web page too
+    python -m recall.live --web --band          # + the band, over Bluetooth (recall/band.py)
     python -m recall.live --src demo.mp4 --show # replay a recording into data/replay/
     python -m recall.live --src demo.mp4 --show --set REPLAY_SPEED=1    # watch it in real time
     python -m recall.live --src demo.mp4 --snapshots data/shots         # every pass as a jpg
@@ -21,6 +22,7 @@ import threading
 from pathlib import Path
 
 from . import config
+from .band import NAME as BAND_NAME
 from .camera import open_source
 from .enroll import load_items
 from .memory import Memory
@@ -182,7 +184,9 @@ def main(argv=None):
     ap.add_argument("--src", help="camera index or a video file to replay (default: SRC setting)")
     ap.add_argument("--show", action="store_true", help="overlay window (q quits)")
     ap.add_argument("--web", action="store_true", help="web page: board, ask box, left/right guidance")
-    ap.add_argument("--band", metavar="HOST", help="with --web: also point the necklace, e.g. recall-band.local")
+    ap.add_argument("--band", nargs="?", const=BAND_NAME, metavar="NAME|HOST",
+                    help=f"with --web: also point the band: over Bluetooth to {BAND_NAME} (the default), another "
+                         "Bluetooth name, or a wifi host such as raspberrypi.local (the Raspberry Pi band)")
     ap.add_argument("--voice", action="store_true", help="ask out loud on this terminal (Enter); implies --web")
     ap.add_argument("--snapshots", type=Path, metavar="DIR", help="save the overlay of every detection pass")
     config.add_args(ap)
