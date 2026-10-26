@@ -4,7 +4,7 @@ One webcam, high in a corner, watches a room. A one-time phone scan gives it a 3
 room's fixed surfaces. The camera keeps a running memory of where each object is in that map.
 A band on the wrist buzzes faster as the hand gets closer to the one you asked for.
 
-Product context, scope and demo: [PLAN.md](./PLAN.md). The camera pipeline as built:
+Product context, scope and demo: [PLAN.md](./archive/PLAN.md). The camera pipeline as built:
 [CAMERA.md](./CAMERA.md). The room files between setup and the live loop:
 [handoffAB.md](./handoffAB.md).
 

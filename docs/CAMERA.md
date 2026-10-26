@@ -2,7 +2,7 @@
 
 The build plan for everything the corner camera does: enroll items, name places, run the
 live loop, keep the memory, and use the scanned room so positions are 3D. Product context:
-[PLAN.md](./PLAN.md). System design: [DESIGN.md](./DESIGN.md) — one corner camera, a phone scan
+[PLAN.md](./archive/PLAN.md). System design: [DESIGN.md](./DESIGN.md) — one corner camera, a phone scan
 of the room, positions in the map. File contract between setup and the live loop:
 [handoffAB.md](./handoffAB.md).
 

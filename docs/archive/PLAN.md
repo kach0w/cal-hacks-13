@@ -1,5 +1,7 @@
 # Recall
 
+> **Archived.** The plan written during Cal Hacks 13, kept as a record. The system as built is in [DESIGN.md](../DESIGN.md) and [CAMERA.md](../CAMERA.md).
+
 **A room that remembers for you.**
 
 A camera watches a room and remembers where the objects that matter ended up — keys,
@@ -10,7 +12,7 @@ answer to use it.
 Built for people living with Alzheimer's or another dementia, for whom *"where did I put
 it, and I don't remember putting it anywhere"* is not an annoyance but a symptom.
 
-Architecture: [DESIGN.md](./DESIGN.md). **Scope is a contract — §8 is the list.**
+Architecture: [DESIGN.md](../DESIGN.md). **Scope is a contract — §8 is the list.**
 
 ---
 
@@ -127,11 +129,11 @@ Three decisions keep it cheap:
 wall. A phone scan maps the room's surfaces, couches included, and finds the markers in it;
 the camera sees the same markers, which puts the scan and the camera in one set of
 coordinates. Objects move freely after that — their positions are recomputed against the
-unchanged map, never rescanned ([DESIGN.md](./DESIGN.md) §1–2).
+unchanged map, never rescanned ([DESIGN.md](../DESIGN.md) §1–2).
 
 **The pulse also carries certainty.** An inferred answer can never buzz as hard as an
 observed one. The system's promise is that it never confidently lies, and the band honours
-that in the channel the person is actually using ([DESIGN.md](./DESIGN.md) §5.2).
+that in the channel the person is actually using ([DESIGN.md](../DESIGN.md) §5.2).
 
 ### The honest limits
 
@@ -267,7 +269,7 @@ thing that's flawless, when reliability *is* the demo.
 **If 5 or 6 won't come good, ship 3.** Pixel-space guidance is the whole demo minus real
 distances.
 
-The full process is [DESIGN.md](./DESIGN.md) §1.
+The full process is [DESIGN.md](../DESIGN.md) §1.
 
 ### Cut — not deferred, cut
 

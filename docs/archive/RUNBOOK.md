@@ -1,5 +1,7 @@
 # Camera session runbook (CAMERA.md §8, tasks 0–3)
 
+> **Archived.** The runbook used during Cal Hacks 13, kept as a record. The system as built is in [DESIGN.md](../DESIGN.md) and [CAMERA.md](../CAMERA.md).
+
 For whoever runs the camera tasks. CAMERA.md is the source of truth; this is the order to do
 things in, what to do with your hands, and what to send back. Run every command from the repo
 root (model weights live there). Times are rough.

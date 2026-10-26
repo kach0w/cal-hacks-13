@@ -1,5 +1,7 @@
 # Recall
 
+<p align="center"><img src="docs/images/logo.png" alt="Recall" width="800"></p>
+
 **A room that remembers where you put things, and points you to them.**
 
 A webcam in the corner of a room keeps a running memory of where the things that matter are:
@@ -11,8 +13,13 @@ It's built for people living with Alzheimer's or another dementia, for whom "I d
 putting it anywhere" is a symptom, not an annoyance. It's also built for their care partner, who
 gets one page showing what's where and what moved today.
 
-Product write-up: [`DEVPOST.md`](./DEVPOST.md). Design: [`docs/DESIGN.md`](docs/DESIGN.md).
-Camera pipeline: [`docs/CAMERA.md`](docs/CAMERA.md).
+- **Demo video:** https://www.youtube.com/watch?v=nTJ7lsNXwlo
+- **Devpost:** https://devpost.com/software/recall-unotik ([write-up](./DEVPOST.md))
+- **Docs:** [system design](docs/DESIGN.md) · [camera pipeline](docs/CAMERA.md)
+
+<p align="center"><img src="docs/images/depth.png" alt="The room learns its own depth: scan, pin markers, place the camera" width="800"></p>
+<p align="center"><img src="docs/images/objects.png" alt="It finds each object and remembers where it is" width="800"></p>
+<p align="center"><img src="docs/images/haptic.png" alt="Haptic guidance: button, mic, query, haptic feedback" width="800"></p>
 
 ---
 
@@ -194,7 +201,7 @@ markers still up. To start the memory over, stop live and delete `data/state.jso
 | `recall/voice.py`, `moss_search.py` | Asking out loud; semantic matching of vague questions |
 | `recall/band.py`, `firmware/` | The band: Bluetooth LE link and ESP32 firmware |
 | `tools/` | Room setup (scan, lens, registration), simulation, tuning, range tests |
-| `docs/` | Product plan, system design, camera pipeline, setup handoff |
+| `docs/` | System design, camera pipeline, room file formats (`handoffAB.md`); hackathon plan and runbook in `docs/archive/` |
 
 ## Privacy
 
